@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/microsoft/vcpkg/master/scripts/vcpkg.schema.json",
+  "name": "dx12track",
+  "version-string": "0.1.0",
+  "description": "DX12 resource-tracking injector. Builds dx12track.exe (console launcher) and dx12track.dll (injected hooks).",
+  "homepage": "https://github.com/jonas-meyer/dx12-track",
+  "dependencies": [
+    "directx-headers"
+  ]
+}

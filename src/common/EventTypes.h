@@ -1,0 +1,148 @@
+#pragma once
+//
+// Wire format shared between dx12track.dll (producer) and dx12track.exe (consumer).
+// Sent over the per-process named pipe \\.\pipe\dx12track-<token>.
+// All structures are POD with fixed sizes so we can write/read raw bytes.
+//
+
+#include <cstdint>
+
+// Pull in D3D12_HEAP_TYPE / D3D12_RESOURCE_DIMENSION / DXGI_FORMAT enums.
+// Both sides include this header; both have the DirectX-Headers (Agility SDK)
+// supplied by vcpkg on the include path.
+#include <directx/d3d12.h>
+
+namespace dx12track {
+
+constexpr uint32_t kProtocolMagic   = 0x44583132; // 'DX12'
+constexpr uint32_t kProtocolVersion = 1;
+constexpr size_t   kMaxNameChars    = 256;
+
+enum class ObjectType : uint8_t {
+    Unknown = 0,
+    Device,
+    Resource,
+    Heap,
+    DescriptorHeap,
+    CommandQueue,
+    CommandAllocator,
+    CommandList,
+    PipelineState,
+    RootSignature,
+    Fence,
+    QueryHeap,
+    CommandSignature,
+    Count
+};
+
+enum class AllocationKind : uint8_t {
+    None = 0,        // non-memory-bearing
+    Committed,       // CreateCommittedResource* — implicit heap
+    Placed,          // CreatePlacedResource* — into an explicit heap
+    Reserved,        // CreateReservedResource* — virtual; physical mapped via UpdateTileMappings
+    Heap             // CreateHeap*  — the heap object itself
+};
+
+enum class EventKind : uint8_t {
+    Hello = 1,       // sent by DLL on connect; carries pid + start time
+    Created,
+    Renamed,
+    Destroyed,
+    Goodbye          // sent by DLL on DLL_PROCESS_DETACH
+};
+
+#pragma pack(push, 1)
+
+struct EventHeader {
+    uint32_t  magic;          // kProtocolMagic
+    uint32_t  payload_bytes;  // size of payload that follows this header
+    uint64_t  ts_ns;          // monotonic ns since process start
+    EventKind kind;
+    uint8_t   _pad[7];
+};
+
+struct HelloPayload {
+    uint32_t protocol_version;
+    uint32_t pid;
+    uint64_t qpc_frequency;
+    wchar_t  exe_path[kMaxNameChars];
+};
+
+struct CreatedPayload {
+    uint64_t id;
+    uint64_t size_bytes;
+    uint64_t parent_heap_id;   // 0 if not Placed
+    uint32_t heap_type;        // D3D12_HEAP_TYPE (0 if alloc==None)
+    uint32_t dimension;        // D3D12_RESOURCE_DIMENSION (Buffer/Texture*/Unknown)
+    uint32_t format;           // DXGI_FORMAT (UNKNOWN for non-resources)
+    ObjectType     type;
+    AllocationKind alloc;
+    uint8_t  _pad[2];
+    wchar_t  name[kMaxNameChars];   // empty until SetName fires
+};
+
+struct RenamedPayload {
+    uint64_t id;
+    wchar_t  name[kMaxNameChars];
+};
+
+struct DestroyedPayload {
+    uint64_t id;
+};
+
+struct GoodbyePayload {
+    uint32_t exit_code;
+};
+
+#pragma pack(pop)
+
+inline const char* ObjectTypeName(ObjectType t) {
+    switch (t) {
+        case ObjectType::Device:           return "Device";
+        case ObjectType::Resource:         return "Resource";
+        case ObjectType::Heap:             return "Heap";
+        case ObjectType::DescriptorHeap:   return "DescriptorHeap";
+        case ObjectType::CommandQueue:     return "CommandQueue";
+        case ObjectType::CommandAllocator: return "CommandAllocator";
+        case ObjectType::CommandList:      return "CommandList";
+        case ObjectType::PipelineState:    return "PipelineState";
+        case ObjectType::RootSignature:    return "RootSignature";
+        case ObjectType::Fence:            return "Fence";
+        case ObjectType::QueryHeap:        return "QueryHeap";
+        case ObjectType::CommandSignature: return "CommandSignature";
+        default:                           return "Unknown";
+    }
+}
+
+inline const char* AllocationKindName(AllocationKind k) {
+    switch (k) {
+        case AllocationKind::Committed: return "Committed";
+        case AllocationKind::Placed:    return "Placed";
+        case AllocationKind::Reserved:  return "Reserved";
+        case AllocationKind::Heap:      return "Heap";
+        default:                        return "None";
+    }
+}
+
+inline const char* HeapTypeName(uint32_t t) {
+    switch (t) {
+        case D3D12_HEAP_TYPE_DEFAULT:    return "Default";
+        case D3D12_HEAP_TYPE_UPLOAD:     return "Upload";
+        case D3D12_HEAP_TYPE_READBACK:   return "Readback";
+        case D3D12_HEAP_TYPE_CUSTOM:     return "Custom";
+        case D3D12_HEAP_TYPE_GPU_UPLOAD: return "GpuUpload";
+        default:                         return "None";
+    }
+}
+
+inline const char* DimensionName(uint32_t d) {
+    switch (d) {
+        case D3D12_RESOURCE_DIMENSION_BUFFER:    return "Buffer";
+        case D3D12_RESOURCE_DIMENSION_TEXTURE1D: return "Tex1D";
+        case D3D12_RESOURCE_DIMENSION_TEXTURE2D: return "Tex2D";
+        case D3D12_RESOURCE_DIMENSION_TEXTURE3D: return "Tex3D";
+        default:                                 return "Unknown";
+    }
+}
+
+} // namespace dx12track

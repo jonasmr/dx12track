@@ -1,0 +1,32 @@
+# Build outputs
+/build/
+*.obj
+*.pdb
+*.ilk
+*.exp
+*.lib
+*.idb
+*.tlog
+*.log
+
+# Visual Studio user state
+/.vs/
+*.user
+*.suo
+*.vcxproj.user
+
+# Runtime artifacts produced by dx12track
+*.jsonl
+launcher.stdout.txt
+launcher.stderr.txt
+
+# vcpkg manifest-mode install tree
+/vcpkg_installed/
+
+# Claude Code per-user state (the `.local.` infix matches the `.env.local`
+# convention — settings.json itself, if added later, would be team-shared).
+.claude/settings.local.json
+
+# Third-party samples checked out locally; too large to vendor in git.
+# Re-fetch with:  git clone https://github.com/microsoft/DirectX-Graphics-Samples
+/DirectX-Graphics-Samples/
