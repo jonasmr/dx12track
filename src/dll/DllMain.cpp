@@ -6,7 +6,9 @@
 #include "EventTypes.h"
 #include "Hooks.h"
 #include "JsonLog.h"
+#include "Modules.h"
 #include "PipeClient.h"
+#include "Tracker.h"
 
 namespace {
 
@@ -37,8 +39,10 @@ void SendHello() {
 }
 
 void OnAttach() {
-    std::wstring pipe_name = EnvW(L"DX12TRACK_PIPE");
-    std::wstring json_path = EnvW(L"DX12TRACK_JSON");
+    std::wstring pipe_name  = EnvW(L"DX12TRACK_PIPE");
+    std::wstring json_path  = EnvW(L"DX12TRACK_JSON");
+    std::wstring callstacks = EnvW(L"DX12TRACK_CALLSTACKS");
+    dx12track::g_capture_callstacks = (callstacks == L"1");
 
     if (!pipe_name.empty()) {
         dx12track::GlobalPipe().Connect(pipe_name, 5000);
@@ -48,6 +52,12 @@ void OnAttach() {
     }
 
     SendHello();
+
+    // Module tracking only when callstacks are on — the module metadata is
+    // dead weight unless we're going to use it for symbolication later.
+    if (dx12track::g_capture_callstacks) {
+        dx12track::StartModuleTracking();
+    }
 
     if (!dx12track::InstallExportHooks()) {
         // Hook installation failed — keep the DLL loaded, but tracking is dead.
@@ -60,6 +70,7 @@ void OnDetach() {
     dx12track::GlobalPipe().Send(dx12track::EventKind::Goodbye, &p, sizeof(p));
     dx12track::GlobalLog().Append(dx12track::EventKind::Goodbye, 0, &p, sizeof(p));
 
+    dx12track::StopModuleTracking();
     dx12track::RemoveAllHooks();
     dx12track::GlobalPipe().Close();
     dx12track::GlobalLog().Close();

@@ -8,6 +8,8 @@
 
 namespace dx12track {
 
+bool g_capture_callstacks = false;
+
 namespace {
 
 // IUnknown::Release lives at vtable index 2; ID3D12Object::SetPrivateData at 4;
@@ -130,6 +132,10 @@ void Tracker::EmitCreated(const ObjectInfo& info) {
     if (n >= kMaxNameChars) n = kMaxNameChars - 1;
     if (n) memcpy(p.name, info.name.c_str(), n * sizeof(wchar_t));
     p.name[n] = 0;
+    p.frame_count = info.frame_count;
+    if (info.frame_count)
+        memcpy(p.frames, info.frames,
+               info.frame_count * sizeof(uint64_t));
 
     GlobalPipe().Send(EventKind::Created, &p, sizeof(p));
     GlobalLog().Append(EventKind::Created, NowNsForJson(), &p, sizeof(p));

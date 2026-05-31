@@ -24,7 +24,16 @@ struct ObjectInfo {
     uint64_t       size_bytes;
     uint64_t       parent_heap_id;
     std::wstring   name;
+
+    // Populated by hooks when --callstacks is enabled; frame_count == 0 means
+    // no stack was captured and the frames array is unused.
+    uint8_t        frame_count = 0;
+    uint64_t       frames[kMaxCallstackFrames] = {};
 };
+
+// Global flag controlling whether hooks capture a stack on each create. Read
+// from the DX12TRACK_CALLSTACKS env var in DllMain.
+extern bool g_capture_callstacks;
 
 class Tracker {
 public:

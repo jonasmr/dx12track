@@ -17,9 +17,11 @@ namespace {
 
 void PrintUsage() {
     fwprintf(stderr,
-        L"Usage: dx12track.exe [-o <log.jsonl>] [--] <target.exe> [args...]\n"
-        L"  -o <path>   path to JSON-Lines log file written by the DLL\n"
-        L"              (default: dx12track.jsonl in the launcher's cwd)\n");
+        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--] <target.exe> [args...]\n"
+        L"  -o <path>     path to JSON-Lines log file written by the DLL\n"
+        L"                (default: dx12track.jsonl in the launcher's cwd)\n"
+        L"  --callstacks  capture a callstack on every object creation and\n"
+        L"                log loaded-module metadata for offline symbolication\n");
 }
 
 // Build a CreateProcessW lpCommandLine that quotes the target exe and appends
@@ -46,12 +48,15 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring jsonl_path = L"dx12track.jsonl";
     std::vector<std::wstring> child_args;
     std::wstring target;
+    bool callstacks = false;
 
     int i = 1;
     for (; i < argc; ++i) {
         std::wstring a = argv[i];
         if (a == L"-o" && i + 1 < argc) {
             jsonl_path = argv[++i];
+        } else if (a == L"--callstacks" || a == L"-c") {
+            callstacks = true;
         } else if (a == L"--") {
             ++i; break;
         } else if (!a.empty() && a[0] == L'-') {
@@ -89,6 +94,7 @@ int wmain(int argc, wchar_t** argv) {
     // 2) Set inheritable env vars so the child's CRT sees them in DllMain.
     SetEnvironmentVariableW(L"DX12TRACK_PIPE", pipe_name.c_str());
     SetEnvironmentVariableW(L"DX12TRACK_JSON", jsonl_path.c_str());
+    SetEnvironmentVariableW(L"DX12TRACK_CALLSTACKS", callstacks ? L"1" : L"0");
 
     // 3) CreateProcess(CREATE_SUSPENDED).
     STARTUPINFOW si{}; si.cb = sizeof(si);

@@ -97,8 +97,22 @@ ObjectInfo MakeSimpleInfo(ObjectType t) {
     return info;
 }
 
-void Track(IUnknown** ppv, const ObjectInfo& info) {
+// noinline so the RtlCaptureStackBackTrace skip count below stays correct
+// regardless of optimizer choices. From inside Track, FramesToSkip=1 skips
+// Track's own frame and starts the trace at the hook function's frame
+// (Hook_CreateCommittedResource, etc.), which is the deepest app-visible
+// frame in the chain.
+__declspec(noinline)
+void Track(IUnknown** ppv, ObjectInfo info) {
     if (!ppv || !*ppv) return;
+    if (g_capture_callstacks) {
+        PVOID frames[kMaxCallstackFrames];
+        USHORT n = RtlCaptureStackBackTrace(1, kMaxCallstackFrames,
+                                             frames, nullptr);
+        info.frame_count = (uint8_t)n;
+        for (USHORT i = 0; i < n; ++i)
+            info.frames[i] = reinterpret_cast<uint64_t>(frames[i]);
+    }
     GlobalTracker().Register(*ppv, info);
 }
 

@@ -51,6 +51,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>kernel32.lib;user32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <IgnoreSpecificDefaultLibraries>MSVCRTD;MSVCRT;%(IgnoreSpecificDefaultLibraries)</IgnoreSpecificDefaultLibraries>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -78,6 +79,7 @@
     <ClCompile Include="Hooks.cpp" />
     <ClCompile Include="DeviceHooks.cpp" />
     <ClCompile Include="ObjectHooks.cpp" />
+    <ClCompile Include="Modules.cpp" />
     <ClCompile Include="Tracker.cpp" />
     <ClCompile Include="PipeClient.cpp" />
     <ClCompile Include="JsonLog.cpp" />
@@ -102,6 +104,7 @@
     <ClInclude Include="Hooks.h" />
     <ClInclude Include="DeviceHooks.h" />
     <ClInclude Include="ObjectHooks.h" />
+    <ClInclude Include="Modules.h" />
     <ClInclude Include="Tracker.h" />
     <ClInclude Include="PipeClient.h" />
     <ClInclude Include="JsonLog.h" />

@@ -14,9 +14,10 @@
 
 namespace dx12track {
 
-constexpr uint32_t kProtocolMagic   = 0x44583132; // 'DX12'
-constexpr uint32_t kProtocolVersion = 1;
-constexpr size_t   kMaxNameChars    = 256;
+constexpr uint32_t kProtocolMagic       = 0x44583132; // 'DX12'
+constexpr uint32_t kProtocolVersion     = 2;
+constexpr size_t   kMaxNameChars        = 256;
+constexpr size_t   kMaxCallstackFrames  = 32;
 
 enum class ObjectType : uint8_t {
     Unknown = 0,
@@ -48,7 +49,9 @@ enum class EventKind : uint8_t {
     Created,
     Renamed,
     Destroyed,
-    Goodbye          // sent by DLL on DLL_PROCESS_DETACH
+    Goodbye,         // sent by DLL on DLL_PROCESS_DETACH
+    ModuleLoaded,    // initial enumeration + LdrRegisterDllNotification
+    ModuleUnloaded,
 };
 
 #pragma pack(push, 1)
@@ -77,8 +80,10 @@ struct CreatedPayload {
     uint32_t format;           // DXGI_FORMAT (UNKNOWN for non-resources)
     ObjectType     type;
     AllocationKind alloc;
-    uint8_t  _pad[2];
+    uint8_t  frame_count;      // 0 when callstacks aren't enabled
+    uint8_t  _pad;
     wchar_t  name[kMaxNameChars];   // empty until SetName fires
+    uint64_t frames[kMaxCallstackFrames];  // top of stack first; rest is garbage
 };
 
 struct RenamedPayload {
@@ -92,6 +97,22 @@ struct DestroyedPayload {
 
 struct GoodbyePayload {
     uint32_t exit_code;
+};
+
+// Enough metadata for an offline symbol resolver to locate matching binaries
+// and PDBs (e.g., via a symbol server using the image hash or PDB hash).
+struct ModuleLoadedPayload {
+    uint64_t base;             // load address in the target process
+    uint64_t size;             // image size in bytes (SizeOfImage)
+    uint32_t timestamp;        // IMAGE_FILE_HEADER.TimeDateStamp (for image hash)
+    uint32_t pdb_age;          // CV_INFO_PDB70.Age (for PDB hash)
+    uint8_t  pdb_guid[16];     // CV_INFO_PDB70.Signature (PDB GUID), all zero if absent
+    wchar_t  name[kMaxNameChars];      // full module path
+    wchar_t  pdb_name[kMaxNameChars];  // PDB path as recorded in the PE debug dir
+};
+
+struct ModuleUnloadedPayload {
+    uint64_t base;
 };
 
 #pragma pack(pop)
