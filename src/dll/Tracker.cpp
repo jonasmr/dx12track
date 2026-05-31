@@ -10,9 +10,12 @@ namespace dx12track {
 
 namespace {
 
-// IUnknown::Release lives at vtable index 2; ID3D12Object::SetName at 6.
-constexpr size_t kSlot_Release = 2;
-constexpr size_t kSlot_SetName = 6;
+// IUnknown::Release lives at vtable index 2; ID3D12Object::SetPrivateData at 4;
+// ID3D12Object::SetName at 6. (Slots 0/1 are QueryInterface/AddRef, 3 is
+// GetPrivateData, 5 is SetPrivateDataInterface — none of those carry names.)
+constexpr size_t kSlot_Release        = 2;
+constexpr size_t kSlot_SetPrivateData = 4;
+constexpr size_t kSlot_SetName        = 6;
 
 void* PatchSlot(void** vtable, size_t index, void* new_fn) {
     DWORD old = 0;
@@ -53,6 +56,8 @@ const Tracker::VTablePatch* Tracker::PatchVTableIfNew(IUnknown* obj) {
     VTablePatch p{};
     p.real_release = PatchSlot(vtable, kSlot_Release,
                                reinterpret_cast<void*>(&Hook_Release));
+    p.real_setprivatedata = PatchSlot(vtable, kSlot_SetPrivateData,
+                               reinterpret_cast<void*>(&Hook_SetPrivateData));
     p.real_setname = PatchSlot(vtable, kSlot_SetName,
                                reinterpret_cast<void*>(&Hook_SetName));
     auto [ins, _] = vtable_patches_.emplace(vtable, p);
@@ -96,15 +101,19 @@ void Tracker::OnReleaseToZero(IUnknown* obj) {
 }
 
 void Tracker::OnSetName(IUnknown* obj, const wchar_t* name) {
+    const std::wstring incoming = name ? std::wstring(name) : std::wstring();
     uint64_t id = 0;
     {
         std::lock_guard<std::mutex> lock(mu_);
         auto it = objects_.find(obj);
         if (it == objects_.end()) return;
+        // SetName forwards to SetPrivateData internally; without this guard
+        // we'd emit two identical Renamed events for every app-level SetName.
+        if (it->second.name == incoming) return;
         id = it->second.id;
-        it->second.name.assign(name ? name : L"");
+        it->second.name = incoming;
     }
-    EmitRenamed(id, name ? name : L"");
+    EmitRenamed(id, incoming.c_str());
 }
 
 void Tracker::EmitCreated(const ObjectInfo& info) {

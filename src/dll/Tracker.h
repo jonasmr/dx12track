@@ -47,8 +47,9 @@ public:
 
     // Vtable hook bookkeeping --------------------------------------------------
     struct VTablePatch {
-        void* real_release  = nullptr;   // original IUnknown::Release
-        void* real_setname  = nullptr;   // original ID3D12Object::SetName
+        void* real_release        = nullptr;   // original IUnknown::Release       (slot 2)
+        void* real_setprivatedata = nullptr;   // original ID3D12Object::SetPrivateData (slot 4)
+        void* real_setname        = nullptr;   // original ID3D12Object::SetName        (slot 6)
     };
     // Returns the patch info for the vtable backing `obj`. If the vtable hasn't
     // been patched yet, patches it now (Release+SetName) and records the
