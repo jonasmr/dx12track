@@ -44,7 +44,7 @@
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
-      <AdditionalIncludeDirectories>$(SolutionDir)src\common;$(SolutionDir)src\third_party\minhook\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(SolutionDir)src\common;$(SolutionDir)include;$(SolutionDir)src\third_party\minhook\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;NOMINMAX;WIN32_LEAN_AND_MEAN;DX12TRACK_DLL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
@@ -83,6 +83,7 @@
     <ClCompile Include="Tracker.cpp" />
     <ClCompile Include="PipeClient.cpp" />
     <ClCompile Include="JsonLog.cpp" />
+    <ClCompile Include="PublicApi.cpp" />
     <ClCompile Include="$(SolutionDir)src\third_party\minhook\src\hook.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <DisableSpecificWarnings>4100;4244;4267</DisableSpecificWarnings>
@@ -108,6 +109,7 @@
     <ClInclude Include="Tracker.h" />
     <ClInclude Include="PipeClient.h" />
     <ClInclude Include="JsonLog.h" />
+    <ClInclude Include="$(SolutionDir)include\dx12track.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

@@ -46,6 +46,13 @@ void AppendKey(std::string& out, const char* k) {
 } // namespace
 
 bool JsonLog::Open(const std::wstring& path) {
+    std::lock_guard<std::mutex> lock(mu_);
+    if (file_ != INVALID_HANDLE_VALUE) {
+        // Allow re-opening (the public API permits calling StartLogging more
+        // than once). Drop the previous handle first so we don't leak it.
+        CloseHandle(file_);
+        file_ = INVALID_HANDLE_VALUE;
+    }
     file_ = CreateFileW(path.c_str(), FILE_APPEND_DATA,
                        FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
                        FILE_ATTRIBUTE_NORMAL, nullptr);

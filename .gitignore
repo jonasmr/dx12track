@@ -30,3 +30,6 @@ launcher.stderr.txt
 # Third-party samples checked out locally; too large to vendor in git.
 # Re-fetch with:  git clone https://github.com/microsoft/DirectX-Graphics-Samples
 /DirectX-Graphics-Samples/
+
+# Local scratch / test programs that have their own git repos
+/EvictionHelper/
