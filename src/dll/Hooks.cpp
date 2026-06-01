@@ -222,6 +222,99 @@ HRESULT WINAPI Hook_D3D12CreateDevice(IUnknown* pAdapter,
     return hr;
 }
 
+// ---- Agility-SDK factory chain --------------------------------------------
+//
+// Modern Agility-SDK apps don't call D3D12CreateDevice at all; they use
+//   D3D12GetInterface(CLSID_D3D12SDKConfiguration, ID3D12SDKConfiguration1, &cfg)
+//   cfg->CreateDeviceFactory(version, path, ID3D12DeviceFactory, &factory)
+//   factory->CreateDevice(adapter, fl, ID3D12Device*, &device)
+// So we mirror the D3D12CreateDevice approach one indirection deeper:
+// hook D3D12GetInterface, patch the SDKConfig1 vtable to catch CreateDevice-
+// Factory, patch the factory vtable to catch the actual CreateDevice, then
+// reuse PatchDeviceVTable on the returned device.
+
+using PFN_D3D12GetInterface_t   = HRESULT (WINAPI*)(REFCLSID, REFIID, void**);
+using PFN_CreateDeviceFactory_t = HRESULT (STDMETHODCALLTYPE*)(
+    IUnknown* self, UINT SDKVersion, LPCSTR SDKPath, REFIID, void**);
+using PFN_FactoryCreateDevice_t = HRESULT (STDMETHODCALLTYPE*)(
+    IUnknown* self, IUnknown* adapter, D3D_FEATURE_LEVEL, REFIID, void**);
+
+PFN_D3D12GetInterface_t   g_real_D3D12GetInterface   = nullptr;
+void*                     g_real_CreateDeviceFactory = nullptr;  // slot 4 on SDKConfig1
+void*                     g_real_FactoryCreateDevice = nullptr;  // slot 6 on DeviceFactory
+
+constexpr size_t kSlot_SDKConfig1_CreateDeviceFactory = 4;
+constexpr size_t kSlot_DeviceFactory_CreateDevice     = 9;
+
+HRESULT STDMETHODCALLTYPE Hook_FactoryCreateDevice(
+    IUnknown* self, IUnknown* adapter,
+    D3D_FEATURE_LEVEL fl, REFIID riid, void** ppDevice) {
+    DiagF("Hook_FactoryCreateDevice fired: factory=0x%llx adapter=0x%llx feature_level=0x%x",
+          (unsigned long long)(uintptr_t)self,
+          (unsigned long long)(uintptr_t)adapter,
+          (unsigned)fl);
+    auto real = reinterpret_cast<PFN_FactoryCreateDevice_t>(g_real_FactoryCreateDevice);
+    HRESULT hr = real(self, adapter, fl, riid, ppDevice);
+    DiagF("Hook_FactoryCreateDevice returned: hr=0x%08x device=0x%llx",
+          (unsigned)hr,
+          (ppDevice && *ppDevice)
+              ? (unsigned long long)(uintptr_t)*ppDevice : 0ull);
+    if (SUCCEEDED(hr) && ppDevice && *ppDevice) {
+        PatchDeviceVTable(*ppDevice);
+    }
+    return hr;
+}
+
+HRESULT STDMETHODCALLTYPE Hook_CreateDeviceFactory(
+    IUnknown* self, UINT SDKVersion, LPCSTR SDKPath,
+    REFIID riid, void** ppvFactory) {
+    DiagF("Hook_CreateDeviceFactory fired: sdkconfig=0x%llx SDKVersion=%u SDKPath=%s",
+          (unsigned long long)(uintptr_t)self,
+          (unsigned)SDKVersion, SDKPath ? SDKPath : "(null)");
+    auto real = reinterpret_cast<PFN_CreateDeviceFactory_t>(g_real_CreateDeviceFactory);
+    HRESULT hr = real(self, SDKVersion, SDKPath, riid, ppvFactory);
+    DiagF("Hook_CreateDeviceFactory returned: hr=0x%08x factory=0x%llx",
+          (unsigned)hr,
+          (ppvFactory && *ppvFactory)
+              ? (unsigned long long)(uintptr_t)*ppvFactory : 0ull);
+    if (SUCCEEDED(hr) && ppvFactory && *ppvFactory) {
+        // Patch the factory's CreateDevice slot (idempotent on shared vtable).
+        auto* factory = static_cast<IUnknown*>(*ppvFactory);
+        void** vtbl = *reinterpret_cast<void***>(factory);
+        if (!AlreadyPatched(vtbl)) {
+            PatchSlot(vtbl, kSlot_DeviceFactory_CreateDevice, "FactoryCreateDevice",
+                      reinterpret_cast<void*>(&Hook_FactoryCreateDevice),
+                      &g_real_FactoryCreateDevice);
+        } else {
+            DiagF("Hook_CreateDeviceFactory: factory vtable 0x%llx already patched",
+                  (unsigned long long)(uintptr_t)vtbl);
+        }
+    }
+    return hr;
+}
+
+HRESULT WINAPI Hook_D3D12GetInterface(REFCLSID rclsid, REFIID riid, void** ppv) {
+    HRESULT hr = g_real_D3D12GetInterface(rclsid, riid, ppv);
+    DiagF("Hook_D3D12GetInterface: hr=0x%08x result=0x%llx",
+          (unsigned)hr,
+          (ppv && *ppv) ? (unsigned long long)(uintptr_t)*ppv : 0ull);
+    if (SUCCEEDED(hr) && ppv && *ppv &&
+        IsEqualIID(riid, __uuidof(ID3D12SDKConfiguration1))) {
+        auto* obj = static_cast<IUnknown*>(*ppv);
+        void** vtbl = *reinterpret_cast<void***>(obj);
+        if (!AlreadyPatched(vtbl)) {
+            PatchSlot(vtbl, kSlot_SDKConfig1_CreateDeviceFactory,
+                      "CreateDeviceFactory",
+                      reinterpret_cast<void*>(&Hook_CreateDeviceFactory),
+                      &g_real_CreateDeviceFactory);
+        } else {
+            DiagF("Hook_D3D12GetInterface: SDKConfig1 vtable 0x%llx already patched",
+                  (unsigned long long)(uintptr_t)vtbl);
+        }
+    }
+    return hr;
+}
+
 // ---- Install / Remove -----------------------------------------------------
 
 bool InstallExportHooks() {
@@ -265,6 +358,31 @@ bool InstallExportHooks() {
     DiagF("InstallExportHooks: MH_EnableHook = %d (%s)",
           (int)mh_enable, mh_enable == MH_OK ? "OK" : "FAILED");
     if (mh_enable != MH_OK) return false;
+
+    // Also hook D3D12GetInterface to catch the Agility-SDK factory chain
+    // (ID3D12SDKConfiguration1::CreateDeviceFactory -> ID3D12DeviceFactory::
+    // CreateDevice). Apps that ship their own D3D12Core.dll typically take
+    // this path and never call D3D12CreateDevice directly.
+    auto get_iface = GetProcAddress(d3d12, "D3D12GetInterface");
+    if (!get_iface) {
+        DiagF("InstallExportHooks: GetProcAddress(D3D12GetInterface) NOT FOUND "
+              "(older d3d12.dll) — factory chain won't be tracked");
+    } else {
+        DiagF("InstallExportHooks: D3D12GetInterface export at 0x%llx, hook at 0x%llx",
+              (unsigned long long)(uintptr_t)get_iface,
+              (unsigned long long)(uintptr_t)&Hook_D3D12GetInterface);
+        MH_STATUS gi_create = MH_CreateHook(
+            reinterpret_cast<LPVOID>(get_iface),
+            reinterpret_cast<LPVOID>(&Hook_D3D12GetInterface),
+            reinterpret_cast<LPVOID*>(&g_real_D3D12GetInterface));
+        DiagF("InstallExportHooks: MH_CreateHook(D3D12GetInterface) = %d (%s)",
+              (int)gi_create, gi_create == MH_OK ? "OK" : "FAILED");
+        if (gi_create == MH_OK) {
+            MH_STATUS gi_enable = MH_EnableHook(reinterpret_cast<LPVOID>(get_iface));
+            DiagF("InstallExportHooks: MH_EnableHook(D3D12GetInterface) = %d (%s)",
+                  (int)gi_enable, gi_enable == MH_OK ? "OK" : "FAILED");
+        }
+    }
 
     return true;
 }
