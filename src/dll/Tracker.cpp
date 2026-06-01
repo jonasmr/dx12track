@@ -1,5 +1,6 @@
 #include "Tracker.h"
 
+#include "Diag.h"
 #include "JsonLog.h"
 #include "ObjectHooks.h"
 #include "PipeClient.h"
@@ -47,6 +48,14 @@ uint64_t NowNsForJson() {
 
 Tracker::Tracker() = default;
 
+const Tracker::VTablePatch* Tracker::LookupVTable(IUnknown* obj) {
+    if (!obj) return nullptr;
+    void** vtable = *reinterpret_cast<void***>(obj);
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = vtable_patches_.find(vtable);
+    return (it == vtable_patches_.end()) ? nullptr : &it->second;
+}
+
 const Tracker::VTablePatch* Tracker::PatchVTableIfNew(IUnknown* obj) {
     if (!obj) return nullptr;
     void** vtable = *reinterpret_cast<void***>(obj);
@@ -62,6 +71,26 @@ const Tracker::VTablePatch* Tracker::PatchVTableIfNew(IUnknown* obj) {
                                reinterpret_cast<void*>(&Hook_SetPrivateData));
     p.real_setname = PatchSlot(vtable, kSlot_SetName,
                                reinterpret_cast<void*>(&Hook_SetName));
+
+    // Belt-and-braces: if the slot was somehow already our hook before we
+    // patched it, the "original" we just captured is a self-reference. Calling
+    // it would recurse forever. Record null so the trampoline skips the real
+    // call instead of trampolining into itself.
+    auto unselfref = [](void* captured, void* hook) -> void* {
+        return (captured == hook) ? nullptr : captured;
+    };
+    if (p.real_release == reinterpret_cast<void*>(&Hook_Release)) {
+        DiagF("WARN PatchVTableIfNew vtable=0x%llx: slot 2 already &Hook_Release "
+              "before patch (lost map entry?). Dropping self-ref.",
+              (unsigned long long)(uintptr_t)vtable);
+    }
+    p.real_release        = unselfref(p.real_release,
+                                       reinterpret_cast<void*>(&Hook_Release));
+    p.real_setprivatedata = unselfref(p.real_setprivatedata,
+                                       reinterpret_cast<void*>(&Hook_SetPrivateData));
+    p.real_setname        = unselfref(p.real_setname,
+                                       reinterpret_cast<void*>(&Hook_SetName));
+
     auto [ins, _] = vtable_patches_.emplace(vtable, p);
     return &ins->second;
 }

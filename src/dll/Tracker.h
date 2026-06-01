@@ -60,10 +60,16 @@ public:
         void* real_setprivatedata = nullptr;   // original ID3D12Object::SetPrivateData (slot 4)
         void* real_setname        = nullptr;   // original ID3D12Object::SetName        (slot 6)
     };
-    // Returns the patch info for the vtable backing `obj`. If the vtable hasn't
-    // been patched yet, patches it now (Release+SetName) and records the
-    // originals. Returns NULL if patching failed.
+    // Patches the vtable if new (Release / SetName / SetPrivateData) and
+    // records the originals. Called from Register at object-creation time —
+    // NOT from the Hook_Release path, because patching there could re-read
+    // our own hook out of the slot and create a self-referencing
+    // real_release that recurses forever.
     const VTablePatch* PatchVTableIfNew(IUnknown* obj);
+
+    // Read-only lookup used by the Hook_Release / Hook_SetName / Hook_Set-
+    // PrivateData trampolines. Returns null if the vtable wasn't registered.
+    const VTablePatch* LookupVTable(IUnknown* obj);
 
 private:
     void EmitCreated(const ObjectInfo& info);

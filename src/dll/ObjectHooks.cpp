@@ -1,5 +1,6 @@
 #include "ObjectHooks.h"
 
+#include "Diag.h"
 #include "Tracker.h"
 
 // WKPDID_D3DDebugObjectName{,W} live in d3dcommon.h, which directx/d3d12.h
@@ -18,20 +19,28 @@ using PfnSetName        = HRESULT (STDMETHODCALLTYPE *)(IUnknown*, LPCWSTR);
 using PfnSetPrivateData = HRESULT (STDMETHODCALLTYPE *)(IUnknown*, REFGUID,
                                                          UINT, const void*);
 
-// Resolve the original method by looking up the patch info for this object's
-// vtable. The Tracker patched the vtable so the entry must exist.
+// Resolve the original method by READ-ONLY lookup of the patch info for this
+// object's vtable. Crucially we do NOT patch here — patching on a hook-fire
+// path can re-read our own hook out of the slot and produce a self-referen-
+// cing trampoline that recurses until the stack overflows.
+//
+// If the vtable isn't in the map, that means we never went through Register
+// for any object of this class — and yet our hook is firing. The trampoline
+// caller treats nullptr as "skip the forward call entirely" (Release will
+// not call the real Release, which leaks the object — preferable to a stack-
+// overflow crash).
 PfnRelease GetRealRelease(IUnknown* self) {
-    auto* p = GlobalTracker().PatchVTableIfNew(self);
+    auto* p = GlobalTracker().LookupVTable(self);
     return p ? reinterpret_cast<PfnRelease>(p->real_release) : nullptr;
 }
 
 PfnSetName GetRealSetName(IUnknown* self) {
-    auto* p = GlobalTracker().PatchVTableIfNew(self);
+    auto* p = GlobalTracker().LookupVTable(self);
     return p ? reinterpret_cast<PfnSetName>(p->real_setname) : nullptr;
 }
 
 PfnSetPrivateData GetRealSetPrivateData(IUnknown* self) {
-    auto* p = GlobalTracker().PatchVTableIfNew(self);
+    auto* p = GlobalTracker().LookupVTable(self);
     return p ? reinterpret_cast<PfnSetPrivateData>(p->real_setprivatedata)
              : nullptr;
 }
@@ -72,7 +81,21 @@ std::wstring ExtractDebugName(REFGUID guid, UINT DataSize, const void* pData) {
 
 ULONG STDMETHODCALLTYPE Hook_Release(IUnknown* self) {
     auto real = GetRealRelease(self);
-    if (!real) return 0;  // shouldn't happen — patch was installed
+    if (!real) {
+        // Unknown vtable hitting our hook — log once and bail. Returning a
+        // positive refcount tells the caller the object is still alive
+        // (preferable to recursing). A leak here is far less bad than the
+        // alternative.
+        static std::atomic<bool> warned{false};
+        if (!warned.exchange(true)) {
+            void** vtbl = self ? *reinterpret_cast<void***>(self) : nullptr;
+            DiagF("WARN Hook_Release on unregistered vtable=0x%llx self=0x%llx — "
+                  "skipping forward call to avoid recursion",
+                  (unsigned long long)(uintptr_t)vtbl,
+                  (unsigned long long)(uintptr_t)self);
+        }
+        return 1;
+    }
     ULONG ref = real(self);
     if (ref == 0) {
         GlobalTracker().OnReleaseToZero(self);
@@ -82,7 +105,8 @@ ULONG STDMETHODCALLTYPE Hook_Release(IUnknown* self) {
 
 HRESULT STDMETHODCALLTYPE Hook_SetName(IUnknown* self, LPCWSTR name) {
     auto real = GetRealSetName(self);
-    HRESULT hr = real ? real(self, name) : S_OK;
+    if (!real) return S_OK;  // unregistered vtable — skip silently
+    HRESULT hr = real(self, name);
     if (SUCCEEDED(hr)) {
         GlobalTracker().OnSetName(self, name);
     }
@@ -92,7 +116,8 @@ HRESULT STDMETHODCALLTYPE Hook_SetName(IUnknown* self, LPCWSTR name) {
 HRESULT STDMETHODCALLTYPE Hook_SetPrivateData(IUnknown* self, REFGUID guid,
                                                UINT DataSize, const void* pData) {
     auto real = GetRealSetPrivateData(self);
-    HRESULT hr = real ? real(self, guid, DataSize, pData) : S_OK;
+    if (!real) return S_OK;  // unregistered vtable — skip silently
+    HRESULT hr = real(self, guid, DataSize, pData);
     if (SUCCEEDED(hr)) {
         std::wstring name = ExtractDebugName(guid, DataSize, pData);
         if (!name.empty()) {
