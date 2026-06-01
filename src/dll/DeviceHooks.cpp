@@ -1,9 +1,13 @@
 #include "DeviceHooks.h"
 
+#include "Diag.h"
 #include "Hooks.h"
 #include "Tracker.h"
 
 #include <cstring>
+#include <mutex>
+#include <string>
+#include <unordered_set>
 
 namespace dx12track {
 
@@ -120,6 +124,22 @@ uint64_t LookupHeapId(ID3D12Heap* heap) {
     return heap ? GlobalTracker().LookupId(heap) : 0;
 }
 
+// Emit a diagnostic exactly once per distinct hook function. Lets the user
+// verify in --verbose mode that each Create* trampoline is actually getting
+// invoked — silence here is the smoking gun for a hook that isn't wired up.
+void NoteFire(const char* hook_name) {
+    if (!g_verbose) return;  // cheap fast path
+    static std::mutex once_mu;
+    static std::unordered_set<std::string> fired;
+    bool first = false;
+    {
+        std::lock_guard<std::mutex> l(once_mu);
+        first = fired.insert(hook_name).second;
+    }
+    if (first)
+        DiagF("first-fire Hook_%s", hook_name);
+}
+
 } // namespace
 
 // ===========================================================================
@@ -129,6 +149,7 @@ uint64_t LookupHeapId(ID3D12Heap* heap) {
 HRESULT STDMETHODCALLTYPE Hook_CreateCommandQueue(
     ID3D12Device* This, const D3D12_COMMAND_QUEUE_DESC* pDesc,
     REFIID riid, void** ppCommandQueue) {
+    NoteFire("CreateCommandQueue");
     auto fn = reinterpret_cast<PFN_CreateCommandQueue>(
         DeviceOriginals().CreateCommandQueue);
     HRESULT hr = fn(This, pDesc, riid, ppCommandQueue);
@@ -141,6 +162,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandQueue(
 HRESULT STDMETHODCALLTYPE Hook_CreateCommandAllocator(
     ID3D12Device* This, D3D12_COMMAND_LIST_TYPE type,
     REFIID riid, void** ppCommandAllocator) {
+    NoteFire("CreateCommandAllocator");
     auto fn = reinterpret_cast<PFN_CreateCommandAllocator>(
         DeviceOriginals().CreateCommandAllocator);
     HRESULT hr = fn(This, type, riid, ppCommandAllocator);
@@ -153,6 +175,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandAllocator(
 HRESULT STDMETHODCALLTYPE Hook_CreateGraphicsPipelineState(
     ID3D12Device* This, const D3D12_GRAPHICS_PIPELINE_STATE_DESC* pDesc,
     REFIID riid, void** ppPipelineState) {
+    NoteFire("CreateGraphicsPipelineState");
     auto fn = reinterpret_cast<PFN_CreateGraphicsPipelineState>(
         DeviceOriginals().CreateGraphicsPipelineState);
     HRESULT hr = fn(This, pDesc, riid, ppPipelineState);
@@ -165,6 +188,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateGraphicsPipelineState(
 HRESULT STDMETHODCALLTYPE Hook_CreateComputePipelineState(
     ID3D12Device* This, const D3D12_COMPUTE_PIPELINE_STATE_DESC* pDesc,
     REFIID riid, void** ppPipelineState) {
+    NoteFire("CreateComputePipelineState");
     auto fn = reinterpret_cast<PFN_CreateComputePipelineState>(
         DeviceOriginals().CreateComputePipelineState);
     HRESULT hr = fn(This, pDesc, riid, ppPipelineState);
@@ -178,6 +202,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandList(
     ID3D12Device* This, UINT nodeMask, D3D12_COMMAND_LIST_TYPE type,
     ID3D12CommandAllocator* pCommandAllocator, ID3D12PipelineState* pInitialState,
     REFIID riid, void** ppCommandList) {
+    NoteFire("CreateCommandList");
     auto fn = reinterpret_cast<PFN_CreateCommandList>(
         DeviceOriginals().CreateCommandList);
     HRESULT hr = fn(This, nodeMask, type, pCommandAllocator, pInitialState,
@@ -191,6 +216,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandList(
 HRESULT STDMETHODCALLTYPE Hook_CreateDescriptorHeap(
     ID3D12Device* This, const D3D12_DESCRIPTOR_HEAP_DESC* pDescriptorHeapDesc,
     REFIID riid, void** ppvHeap) {
+    NoteFire("CreateDescriptorHeap");
     auto fn = reinterpret_cast<PFN_CreateDescriptorHeap>(
         DeviceOriginals().CreateDescriptorHeap);
     HRESULT hr = fn(This, pDescriptorHeapDesc, riid, ppvHeap);
@@ -203,6 +229,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateDescriptorHeap(
 HRESULT STDMETHODCALLTYPE Hook_CreateRootSignature(
     ID3D12Device* This, UINT nodeMask, const void* pBlobWithRootSignature,
     SIZE_T blobLengthInBytes, REFIID riid, void** ppvRootSignature) {
+    NoteFire("CreateRootSignature");
     auto fn = reinterpret_cast<PFN_CreateRootSignature>(
         DeviceOriginals().CreateRootSignature);
     HRESULT hr = fn(This, nodeMask, pBlobWithRootSignature, blobLengthInBytes,
@@ -219,6 +246,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommittedResource(
     D3D12_RESOURCE_STATES InitialResourceState,
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     REFIID riidResource, void** ppvResource) {
+    NoteFire("CreateCommittedResource");
     auto fn = reinterpret_cast<PFN_CreateCommittedResource>(
         DeviceOriginals().CreateCommittedResource);
     HRESULT hr = fn(This, pHeapProperties, HeapFlags, pDesc, InitialResourceState,
@@ -233,6 +261,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommittedResource(
 HRESULT STDMETHODCALLTYPE Hook_CreateHeap(
     ID3D12Device* This, const D3D12_HEAP_DESC* pDesc,
     REFIID riid, void** ppvHeap) {
+    NoteFire("CreateHeap");
     auto fn = reinterpret_cast<PFN_CreateHeap>(DeviceOriginals().CreateHeap);
     HRESULT hr = fn(This, pDesc, riid, ppvHeap);
     if (SUCCEEDED(hr) && pDesc)
@@ -244,6 +273,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource(
     ID3D12Device* This, ID3D12Heap* pHeap, UINT64 HeapOffset,
     const D3D12_RESOURCE_DESC* pDesc, D3D12_RESOURCE_STATES InitialState,
     const D3D12_CLEAR_VALUE* pOptimizedClearValue, REFIID riid, void** ppvResource) {
+    NoteFire("CreatePlacedResource");
     auto fn = reinterpret_cast<PFN_CreatePlacedResource>(
         DeviceOriginals().CreatePlacedResource);
     HRESULT hr = fn(This, pHeap, HeapOffset, pDesc, InitialState,
@@ -266,6 +296,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateReservedResource(
     D3D12_RESOURCE_STATES InitialState,
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     REFIID riid, void** ppvResource) {
+    NoteFire("CreateReservedResource");
     auto fn = reinterpret_cast<PFN_CreateReservedResource>(
         DeviceOriginals().CreateReservedResource);
     HRESULT hr = fn(This, pDesc, InitialState, pOptimizedClearValue,
@@ -280,6 +311,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateReservedResource(
 HRESULT STDMETHODCALLTYPE Hook_CreateFence(
     ID3D12Device* This, UINT64 InitialValue, D3D12_FENCE_FLAGS Flags,
     REFIID riid, void** ppFence) {
+    NoteFire("CreateFence");
     auto fn = reinterpret_cast<PFN_CreateFence>(DeviceOriginals().CreateFence);
     HRESULT hr = fn(This, InitialValue, Flags, riid, ppFence);
     if (SUCCEEDED(hr))
@@ -291,6 +323,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateFence(
 HRESULT STDMETHODCALLTYPE Hook_CreateQueryHeap(
     ID3D12Device* This, const D3D12_QUERY_HEAP_DESC* pDesc,
     REFIID riid, void** ppvHeap) {
+    NoteFire("CreateQueryHeap");
     auto fn = reinterpret_cast<PFN_CreateQueryHeap>(
         DeviceOriginals().CreateQueryHeap);
     HRESULT hr = fn(This, pDesc, riid, ppvHeap);
@@ -303,6 +336,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateQueryHeap(
 HRESULT STDMETHODCALLTYPE Hook_CreateCommandSignature(
     ID3D12Device* This, const D3D12_COMMAND_SIGNATURE_DESC* pDesc,
     ID3D12RootSignature* pRootSignature, REFIID riid, void** ppvCommandSignature) {
+    NoteFire("CreateCommandSignature");
     auto fn = reinterpret_cast<PFN_CreateCommandSignature>(
         DeviceOriginals().CreateCommandSignature);
     HRESULT hr = fn(This, pDesc, pRootSignature, riid, ppvCommandSignature);
@@ -319,6 +353,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandSignature(
 HRESULT STDMETHODCALLTYPE Hook_CreatePipelineState(
     ID3D12Device2* This, const D3D12_PIPELINE_STATE_STREAM_DESC* pDesc,
     REFIID riid, void** ppPipelineState) {
+    NoteFire("CreatePipelineState");
     auto fn = reinterpret_cast<PFN_CreatePipelineState>(
         DeviceOriginals().CreatePipelineState);
     HRESULT hr = fn(This, pDesc, riid, ppPipelineState);
@@ -335,6 +370,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePipelineState(
 HRESULT STDMETHODCALLTYPE Hook_CreateCommandList1(
     ID3D12Device4* This, UINT nodeMask, D3D12_COMMAND_LIST_TYPE type,
     D3D12_COMMAND_LIST_FLAGS flags, REFIID riid, void** ppCommandList) {
+    NoteFire("CreateCommandList1");
     auto fn = reinterpret_cast<PFN_CreateCommandList1>(
         DeviceOriginals().CreateCommandList1);
     HRESULT hr = fn(This, nodeMask, type, flags, riid, ppCommandList);
@@ -351,6 +387,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommittedResource1(
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     ID3D12ProtectedResourceSession* pProtectedSession,
     REFIID riidResource, void** ppvResource) {
+    NoteFire("CreateCommittedResource1");
     auto fn = reinterpret_cast<PFN_CreateCommittedResource1>(
         DeviceOriginals().CreateCommittedResource1);
     HRESULT hr = fn(This, pHeapProperties, HeapFlags, pDesc, InitialResourceState,
@@ -367,6 +404,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateHeap1(
     ID3D12Device4* This, const D3D12_HEAP_DESC* pDesc,
     ID3D12ProtectedResourceSession* pProtectedSession,
     REFIID riid, void** ppvHeap) {
+    NoteFire("CreateHeap1");
     auto fn = reinterpret_cast<PFN_CreateHeap1>(DeviceOriginals().CreateHeap1);
     HRESULT hr = fn(This, pDesc, pProtectedSession, riid, ppvHeap);
     if (SUCCEEDED(hr) && pDesc)
@@ -380,6 +418,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateReservedResource1(
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     ID3D12ProtectedResourceSession* pProtectedSession,
     REFIID riid, void** ppvResource) {
+    NoteFire("CreateReservedResource1");
     auto fn = reinterpret_cast<PFN_CreateReservedResource1>(
         DeviceOriginals().CreateReservedResource1);
     HRESULT hr = fn(This, pDesc, InitialState, pOptimizedClearValue,
@@ -402,6 +441,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommittedResource2(
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     ID3D12ProtectedResourceSession* pProtectedSession,
     REFIID riidResource, void** ppvResource) {
+    NoteFire("CreateCommittedResource2");
     auto fn = reinterpret_cast<PFN_CreateCommittedResource2>(
         DeviceOriginals().CreateCommittedResource2);
     HRESULT hr = fn(This, pHeapProperties, HeapFlags, pDesc, InitialResourceState,
@@ -421,6 +461,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource1(
     const D3D12_RESOURCE_DESC1* pDesc, D3D12_RESOURCE_STATES InitialState,
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     REFIID riid, void** ppvResource) {
+    NoteFire("CreatePlacedResource1");
     auto fn = reinterpret_cast<PFN_CreatePlacedResource1>(
         DeviceOriginals().CreatePlacedResource1);
     HRESULT hr = fn(This, pHeap, HeapOffset, pDesc, InitialState,
@@ -443,6 +484,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource1(
 HRESULT STDMETHODCALLTYPE Hook_CreateCommandQueue1(
     ID3D12Device9* This, const D3D12_COMMAND_QUEUE_DESC* pDesc,
     REFIID CreatorID, REFIID riid, void** ppCommandQueue) {
+    NoteFire("CreateCommandQueue1");
     auto fn = reinterpret_cast<PFN_CreateCommandQueue1>(
         DeviceOriginals().CreateCommandQueue1);
     HRESULT hr = fn(This, pDesc, CreatorID, riid, ppCommandQueue);
@@ -464,6 +506,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommittedResource3(
     ID3D12ProtectedResourceSession* pProtectedSession,
     UINT32 NumCastableFormats, const DXGI_FORMAT* pCastableFormats,
     REFIID riidResource, void** ppvResource) {
+    NoteFire("CreateCommittedResource3");
     auto fn = reinterpret_cast<PFN_CreateCommittedResource3>(
         DeviceOriginals().CreateCommittedResource3);
     HRESULT hr = fn(This, pHeapProperties, HeapFlags, pDesc, InitialLayout,
@@ -485,6 +528,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource2(
     const D3D12_CLEAR_VALUE* pOptimizedClearValue,
     UINT32 NumCastableFormats, const DXGI_FORMAT* pCastableFormats,
     REFIID riid, void** ppvResource) {
+    NoteFire("CreatePlacedResource2");
     auto fn = reinterpret_cast<PFN_CreatePlacedResource2>(
         DeviceOriginals().CreatePlacedResource2);
     HRESULT hr = fn(This, pHeap, HeapOffset, pDesc, InitialLayout,
@@ -508,6 +552,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreateReservedResource2(
     ID3D12ProtectedResourceSession* pProtectedSession,
     UINT32 NumCastableFormats, const DXGI_FORMAT* pCastableFormats,
     REFIID riid, void** ppvResource) {
+    NoteFire("CreateReservedResource2");
     auto fn = reinterpret_cast<PFN_CreateReservedResource2>(
         DeviceOriginals().CreateReservedResource2);
     HRESULT hr = fn(This, pDesc, InitialLayout, pOptimizedClearValue,

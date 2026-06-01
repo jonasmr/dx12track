@@ -15,9 +15,10 @@
 namespace dx12track {
 
 constexpr uint32_t kProtocolMagic       = 0x44583132; // 'DX12'
-constexpr uint32_t kProtocolVersion     = 2;
+constexpr uint32_t kProtocolVersion     = 3;
 constexpr size_t   kMaxNameChars        = 256;
 constexpr size_t   kMaxCallstackFrames  = 32;
+constexpr size_t   kMaxDiagnosticChars  = 512;
 
 enum class ObjectType : uint8_t {
     Unknown = 0,
@@ -52,6 +53,7 @@ enum class EventKind : uint8_t {
     Goodbye,         // sent by DLL on DLL_PROCESS_DETACH
     ModuleLoaded,    // initial enumeration + LdrRegisterDllNotification
     ModuleUnloaded,
+    Diagnostic,      // verbose-mode trace of injection / hook install / per-fire markers
 };
 
 #pragma pack(push, 1)
@@ -113,6 +115,13 @@ struct ModuleLoadedPayload {
 
 struct ModuleUnloadedPayload {
     uint64_t base;
+};
+
+// ASCII message buffer — diagnostics carry hex addresses, MH_* result codes,
+// and short English strings. 512 bytes is plenty for what we emit and keeps
+// the wire format fixed-size like everything else.
+struct DiagnosticPayload {
+    char message[kMaxDiagnosticChars];
 };
 
 #pragma pack(pop)

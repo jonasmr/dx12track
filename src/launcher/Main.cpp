@@ -17,11 +17,14 @@ namespace {
 
 void PrintUsage() {
     fwprintf(stderr,
-        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--] <target.exe> [args...]\n"
+        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--] <target.exe> [args...]\n"
         L"  -o <path>     path to JSON-Lines log file written by the DLL\n"
         L"                (default: dx12track.jsonl in the launcher's cwd)\n"
         L"  --callstacks  capture a callstack on every object creation and\n"
-        L"                log loaded-module metadata for offline symbolication\n");
+        L"                log loaded-module metadata for offline symbolication\n"
+        L"  --verbose     emit injection / hook-install / per-fire diagnostics\n"
+        L"                into the JSONL as \"diag\" events (for debugging\n"
+        L"                why tracking might not be picking up a target)\n");
 }
 
 // Build a CreateProcessW lpCommandLine that quotes the target exe and appends
@@ -49,6 +52,7 @@ int wmain(int argc, wchar_t** argv) {
     std::vector<std::wstring> child_args;
     std::wstring target;
     bool callstacks = false;
+    bool verbose    = false;
 
     int i = 1;
     for (; i < argc; ++i) {
@@ -57,6 +61,8 @@ int wmain(int argc, wchar_t** argv) {
             jsonl_path = argv[++i];
         } else if (a == L"--callstacks" || a == L"-c") {
             callstacks = true;
+        } else if (a == L"--verbose" || a == L"-v") {
+            verbose = true;
         } else if (a == L"--") {
             ++i; break;
         } else if (!a.empty() && a[0] == L'-') {
@@ -95,6 +101,7 @@ int wmain(int argc, wchar_t** argv) {
     SetEnvironmentVariableW(L"DX12TRACK_PIPE", pipe_name.c_str());
     SetEnvironmentVariableW(L"DX12TRACK_JSON", jsonl_path.c_str());
     SetEnvironmentVariableW(L"DX12TRACK_CALLSTACKS", callstacks ? L"1" : L"0");
+    SetEnvironmentVariableW(L"DX12TRACK_VERBOSE",    verbose    ? L"1" : L"0");
 
     // 3) CreateProcess(CREATE_SUSPENDED).
     STARTUPINFOW si{}; si.cb = sizeof(si);

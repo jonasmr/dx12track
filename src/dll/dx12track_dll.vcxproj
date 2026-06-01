@@ -84,6 +84,7 @@
     <ClCompile Include="PipeClient.cpp" />
     <ClCompile Include="JsonLog.cpp" />
     <ClCompile Include="PublicApi.cpp" />
+    <ClCompile Include="Diag.cpp" />
     <ClCompile Include="$(SolutionDir)src\third_party\minhook\src\hook.c">
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <DisableSpecificWarnings>4100;4244;4267</DisableSpecificWarnings>
@@ -109,6 +110,7 @@
     <ClInclude Include="Tracker.h" />
     <ClInclude Include="PipeClient.h" />
     <ClInclude Include="JsonLog.h" />
+    <ClInclude Include="Diag.h" />
     <ClInclude Include="$(SolutionDir)include\dx12track.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

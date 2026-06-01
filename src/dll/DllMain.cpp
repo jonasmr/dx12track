@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 
+#include "Diag.h"
 #include "EventTypes.h"
 #include "Hooks.h"
 #include "JsonLog.h"
@@ -42,7 +43,9 @@ void OnAttach() {
     std::wstring pipe_name  = EnvW(L"DX12TRACK_PIPE");
     std::wstring json_path  = EnvW(L"DX12TRACK_JSON");
     std::wstring callstacks = EnvW(L"DX12TRACK_CALLSTACKS");
+    std::wstring verbose    = EnvW(L"DX12TRACK_VERBOSE");
     dx12track::g_capture_callstacks = (callstacks == L"1");
+    dx12track::g_verbose            = (verbose    == L"1");
 
     if (!pipe_name.empty()) {
         dx12track::GlobalPipe().Connect(pipe_name, 5000);
@@ -53,6 +56,16 @@ void OnAttach() {
 
     SendHello();
 
+    // First diagnostic — confirms DLL was loaded and reached OnAttach, the
+    // log file is open, and the env vars came through. If the user sees a
+    // hello but no diagnostics at all when --verbose is on, the env var
+    // didn't propagate to the child.
+    dx12track::DiagF("dx12track DllMain attached, pid=%lu, pipe=%ls, json=%ls, callstacks=%d",
+        GetCurrentProcessId(),
+        pipe_name.empty() ? L"(none)" : pipe_name.c_str(),
+        json_path.empty() ? L"(none)" : json_path.c_str(),
+        dx12track::g_capture_callstacks ? 1 : 0);
+
     // Module tracking only when callstacks are on — the module metadata is
     // dead weight unless we're going to use it for symbolication later.
     if (dx12track::g_capture_callstacks) {
@@ -60,8 +73,9 @@ void OnAttach() {
     }
 
     if (!dx12track::InstallExportHooks()) {
-        // Hook installation failed — keep the DLL loaded, but tracking is dead.
-        // (We could OutputDebugStringW here for visibility.)
+        dx12track::DiagF("InstallExportHooks() returned FALSE — tracking will be dead");
+    } else {
+        dx12track::DiagF("InstallExportHooks() returned TRUE");
     }
 }
 

@@ -212,6 +212,36 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
             }
             break;
         }
+        case EventKind::Diagnostic: {
+            out.append("\"diag\"");
+            comma_kv_u64("ts_ns", ts_ns);
+            if (payload_bytes >= sizeof(DiagnosticPayload)) {
+                auto* p = static_cast<const DiagnosticPayload*>(payload);
+                out.push_back(','); AppendKey(out, "msg");
+                // The diag message is ASCII printf output. Escape JSON-special
+                // chars on the way out; no UTF-8 multibyte handling needed.
+                out.push_back('"');
+                for (size_t i = 0; i < kMaxDiagnosticChars && p->message[i]; ++i) {
+                    char c = p->message[i];
+                    switch (c) {
+                        case '\\': out.append("\\\\"); continue;
+                        case '"':  out.append("\\\""); continue;
+                        case '\n': out.append("\\n");  continue;
+                        case '\r': out.append("\\r");  continue;
+                        case '\t': out.append("\\t");  continue;
+                        default: break;
+                    }
+                    if ((unsigned char)c < 0x20) {
+                        char esc[8]; sprintf(esc, "\\u%04x", (unsigned)(unsigned char)c);
+                        out.append(esc);
+                    } else {
+                        out.push_back(c);
+                    }
+                }
+                out.push_back('"');
+            }
+            break;
+        }
     }
 
     out.push_back('}');
