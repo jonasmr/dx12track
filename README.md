@@ -97,10 +97,10 @@ Hooks install in `DllMain`, so `LoadLibraryW` is what arms the tracker; the
 ## Output: JSONL format
 
 One JSON object per line. Stable record shapes (no nested objects beyond
-arrays). Sample lines:
+arrays). Current protocol version is **3**. Sample lines:
 
 ```jsonl
-{"event":"hello","ts_ns":0,"pid":36592,"protocol":2,"qpc_freq":10000000,"exe":"…\\ModelViewer.exe"}
+{"event":"hello","ts_ns":0,"pid":36592,"protocol":3,"qpc_freq":10000000,"exe":"…\\ModelViewer.exe"}
 {"event":"module_loaded","ts_ns":0,"base":"0x7ff6c9060000","size":11304960,"timestamp":1780203981,"pdb_age":1,"pdb_guid":"8c3d35b8-e4f6-4d6e-8f7a-fd384f00bdbb","name":"…\\ModelViewer.exe","pdb_name":"…\\ModelViewer.pdb"}
 {"event":"created","ts_ns":52606800,"id":12,"type":"Resource","alloc":"Committed","heap":"Default","dim":"Tex2D","format":28,"size":65536,"parent_heap_id":0,"name":"","stack":["0x7ff89ddc9228","0x7ff928dfb972",…]}
 {"event":"renamed","ts_ns":53180300,"id":12,"name":"ShadowMap"}
@@ -108,27 +108,14 @@ arrays). Sample lines:
 {"event":"goodbye","ts_ns":1234567890,"exit_code":0}
 ```
 
-Field reference:
+Event kinds: `hello` / `created` / `renamed` / `destroyed` /
+`module_loaded` / `module_unloaded` / `goodbye` / `diag` (verbose mode).
 
-| Event | Required | Optional |
-| --- | --- | --- |
-| `hello` | `pid`, `protocol`, `qpc_freq`, `exe` | — |
-| `created` | `id`, `type`, `alloc`, `heap`, `dim`, `format`, `size`, `parent_heap_id`, `name` | `stack` (when `--callstacks`) |
-| `renamed` | `id`, `name` | — |
-| `destroyed` | `id` | — |
-| `module_loaded` | `base`, `size`, `timestamp`, `pdb_guid`, `pdb_age`, `name`, `pdb_name` | — |
-| `module_unloaded` | `base` | — |
-| `goodbye` | `exit_code` | — |
-
-`type` ∈ {`Resource`, `Heap`, `DescriptorHeap`, `CommandQueue`,
-`CommandAllocator`, `CommandList`, `PipelineState`, `RootSignature`, `Fence`,
-`QueryHeap`, `CommandSignature`}.
-
-`alloc` ∈ {`None`, `Committed`, `Placed`, `Reserved`, `Heap`}.
-
-Addresses (`base`, `stack` entries) are emitted as quoted hex strings to
-preserve full 64-bit precision through JSON consumers that parse numbers as
-doubles.
+See **[FORMAT.md](FORMAT.md)** for the full schema — per-event field
+tables, a JSON-Schema draft-2020-12 document, versioning policy, and
+consumer notes. The short version: addresses are quoted hex strings,
+`ts_ns` is monotonic nanoseconds from 0 at attach time, `id` is unique
+across a run, and unknown event kinds / unknown fields should be skipped.
 
 ## Callstacks
 
