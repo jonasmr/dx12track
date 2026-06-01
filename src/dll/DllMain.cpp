@@ -39,6 +39,43 @@ void SendHello() {
     dx12track::GlobalLog().Append(dx12track::EventKind::Hello, 0, &p, sizeof(p));
 }
 
+void WaitForDebuggerIfRequested() {
+    std::wstring want = EnvW(L"DX12TRACK_WAIT_DEBUGGER");
+    if (want != L"1") return;
+
+    // Block here with a MessageBox so the user has unlimited time to attach
+    // their debugger by PID. After they click OK, hit __debugbreak so the
+    // attached debugger immediately catches an int3 at a known site and they
+    // can step through the rest of DllMain (hook install, module enumeration,
+    // first Create* fire).
+    //
+    // Why MessageBox specifically: it's synchronous, doesn't require a
+    // message pump, and won't disturb the host's loader lock invariants the
+    // way a busy-wait on IsDebuggerPresent would.
+    wchar_t exe[MAX_PATH] = {};
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+
+    wchar_t msg[768];
+    _snwprintf_s(msg, _TRUNCATE,
+        L"dx12track has been injected into PID %lu.\n"
+        L"Executable: %ls\n\n"
+        L"Attach your debugger now, then click OK.\n"
+        L"The DLL will hit __debugbreak() right after this dialog so the "
+        L"debugger pauses at a known site.",
+        GetCurrentProcessId(), exe);
+
+    MessageBoxW(nullptr, msg, L"dx12track --debugger",
+                MB_OK | MB_ICONINFORMATION | MB_TOPMOST);
+
+    // If a debugger is attached, this fires an int3 → debugger pauses here.
+    // If no debugger attached (user clicked OK without attaching), this
+    // would normally crash the process; guard with IsDebuggerPresent so we
+    // don't take the host down for a stray OK click.
+    if (IsDebuggerPresent()) {
+        __debugbreak();
+    }
+}
+
 void OnAttach() {
     std::wstring pipe_name  = EnvW(L"DX12TRACK_PIPE");
     std::wstring json_path  = EnvW(L"DX12TRACK_JSON");
@@ -46,6 +83,11 @@ void OnAttach() {
     std::wstring verbose    = EnvW(L"DX12TRACK_VERBOSE");
     dx12track::g_capture_callstacks = (callstacks == L"1");
     dx12track::g_verbose            = (verbose    == L"1");
+
+    // Wait for debugger BEFORE we touch the pipe or open the log so the user
+    // can step through everything that follows, including any deadlocks
+    // that might happen during module enumeration / pipe writes.
+    WaitForDebuggerIfRequested();
 
     if (!pipe_name.empty()) {
         dx12track::GlobalPipe().Connect(pipe_name, 5000);

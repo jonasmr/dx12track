@@ -29,7 +29,8 @@ std::wstring FormatLastError(DWORD code) {
 
 } // namespace
 
-InjectionResult InjectDll(HANDLE process_handle, const std::wstring& dll_path) {
+InjectionResult InjectDll(HANDLE process_handle, const std::wstring& dll_path,
+                          DWORD wait_ms) {
     InjectionResult r{};
     r.ok = false;
 
@@ -78,7 +79,7 @@ InjectionResult InjectDll(HANDLE process_handle, const std::wstring& dll_path) {
     }
 
     // Wait for LoadLibraryW to return inside the target.
-    DWORD wait = WaitForSingleObject(thread, 30000);
+    DWORD wait = WaitForSingleObject(thread, wait_ms);
     if (wait != WAIT_OBJECT_0) {
         r.last_error = GetLastError();
         r.message = L"WaitForSingleObject(remote LoadLibrary) returned non-signaled";

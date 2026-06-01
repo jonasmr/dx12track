@@ -42,11 +42,20 @@ bool PipeServer::Create(std::wstring* out_pipe_name) {
         pipe_name_.c_str(),
         PIPE_ACCESS_INBOUND,
         PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
-        1,           // max instances
-        0,           // out buffer (unused — inbound only)
-        64 * 1024,   // in buffer
+        1,                    // max instances
+        0,                    // out buffer (unused — inbound only)
+        4 * 1024 * 1024,      // in buffer (see below)
         0,
         nullptr);
+    // 4 MiB in-buffer. Under --callstacks the DLL's DllMain dumps a
+    // ModuleLoaded event for every module already loaded in the target
+    // (often 200+ for real games, ~1 KiB per event); meanwhile the launcher
+    // hasn't called ResumeThread yet so its reader thread isn't draining the
+    // pipe. With a small buffer the DLL's WriteFile blocks, DllMain hangs,
+    // the remote LoadLibraryW never returns, and the launcher's
+    // WaitForSingleObject times out — total deadlock. 4 MiB comfortably
+    // absorbs a few thousand events; if a real workload exceeds that we
+    // need overlapped I/O on the writer side, not just a bigger buffer.
 
     if (pipe_handle_ == INVALID_HANDLE_VALUE) {
         fwprintf(stderr, L"CreateNamedPipeW failed: %lu\n", GetLastError());

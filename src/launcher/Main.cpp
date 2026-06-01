@@ -17,14 +17,18 @@ namespace {
 
 void PrintUsage() {
     fwprintf(stderr,
-        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--] <target.exe> [args...]\n"
+        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger] [--] <target.exe> [args...]\n"
         L"  -o <path>     path to JSON-Lines log file written by the DLL\n"
         L"                (default: dx12track.jsonl in the launcher's cwd)\n"
         L"  --callstacks  capture a callstack on every object creation and\n"
         L"                log loaded-module metadata for offline symbolication\n"
         L"  --verbose     emit injection / hook-install / per-fire diagnostics\n"
         L"                into the JSONL as \"diag\" events (for debugging\n"
-        L"                why tracking might not be picking up a target)\n");
+        L"                why tracking might not be picking up a target)\n"
+        L"  --debugger    block in DllMain with a MessageBox prompting you to\n"
+        L"                attach a debugger. After you click OK, the DLL hits\n"
+        L"                __debugbreak() so the debugger can step through the\n"
+        L"                rest of injection/hook install.\n");
 }
 
 // Build a CreateProcessW lpCommandLine that quotes the target exe and appends
@@ -51,8 +55,9 @@ int wmain(int argc, wchar_t** argv) {
     std::wstring jsonl_path = L"dx12track.jsonl";
     std::vector<std::wstring> child_args;
     std::wstring target;
-    bool callstacks = false;
-    bool verbose    = false;
+    bool callstacks    = false;
+    bool verbose       = false;
+    bool wait_debugger = false;
 
     int i = 1;
     for (; i < argc; ++i) {
@@ -63,6 +68,8 @@ int wmain(int argc, wchar_t** argv) {
             callstacks = true;
         } else if (a == L"--verbose" || a == L"-v") {
             verbose = true;
+        } else if (a == L"--debugger") {
+            wait_debugger = true;
         } else if (a == L"--") {
             ++i; break;
         } else if (!a.empty() && a[0] == L'-') {
@@ -100,8 +107,10 @@ int wmain(int argc, wchar_t** argv) {
     // 2) Set inheritable env vars so the child's CRT sees them in DllMain.
     SetEnvironmentVariableW(L"DX12TRACK_PIPE", pipe_name.c_str());
     SetEnvironmentVariableW(L"DX12TRACK_JSON", jsonl_path.c_str());
-    SetEnvironmentVariableW(L"DX12TRACK_CALLSTACKS", callstacks ? L"1" : L"0");
-    SetEnvironmentVariableW(L"DX12TRACK_VERBOSE",    verbose    ? L"1" : L"0");
+    SetEnvironmentVariableW(L"DX12TRACK_CALLSTACKS", callstacks    ? L"1" : L"0");
+    SetEnvironmentVariableW(L"DX12TRACK_VERBOSE",    verbose       ? L"1" : L"0");
+    SetEnvironmentVariableW(L"DX12TRACK_WAIT_DEBUGGER",
+                            wait_debugger ? L"1" : L"0");
 
     // 3) CreateProcess(CREATE_SUSPENDED).
     STARTUPINFOW si{}; si.cb = sizeof(si);
@@ -123,8 +132,11 @@ int wmain(int argc, wchar_t** argv) {
     fwprintf(stdout, L"Started %ls (pid %lu), suspended.\n",
         target.c_str(), pi.dwProcessId);
 
-    // 4) Inject the DLL.
-    auto inj = dx12track::InjectDll(pi.hProcess, dll_path);
+    // 4) Inject the DLL. With --debugger the DLL blocks in a MessageBox so
+    //    the remote LoadLibraryW won't return until the user clicks OK — use
+    //    INFINITE so we don't time out waiting.
+    auto inj = dx12track::InjectDll(pi.hProcess, dll_path,
+        wait_debugger ? INFINITE : 30000);
     if (!inj.ok) {
         fwprintf(stderr, L"Injection failed: %ls\n", inj.message.c_str());
         TerminateProcess(pi.hProcess, 5);
