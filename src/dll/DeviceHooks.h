@@ -70,6 +70,12 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandSignature(
     ID3D12Device* This, const D3D12_COMMAND_SIGNATURE_DESC* pDesc,
     ID3D12RootSignature* pRootSignature, REFIID riid, void** ppvCommandSignature);
 
+// ID3D12Device1 -------------------------------------------------------------
+HRESULT STDMETHODCALLTYPE Hook_SetResidencyPriority(
+    ID3D12Device1* This, UINT NumObjects,
+    ID3D12Pageable* const* ppObjects,
+    const D3D12_RESIDENCY_PRIORITY* pPriorities);
+
 // ID3D12Device2 -------------------------------------------------------------
 HRESULT STDMETHODCALLTYPE Hook_CreatePipelineState(
     ID3D12Device2* This, const D3D12_PIPELINE_STATE_STREAM_DESC* pDesc,

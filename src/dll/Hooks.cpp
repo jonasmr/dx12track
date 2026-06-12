@@ -166,6 +166,10 @@ void PatchDeviceVTable(void* device_iunknown) {
     PatchSlot(vtable, 41, "CreateCommandSignature", reinterpret_cast<void*>(&Hook_CreateCommandSignature),
               &g_dev_originals.CreateCommandSignature);
 
+    if (v >= 1)
+        PatchSlot(vtable, 46, "SetResidencyPriority", reinterpret_cast<void*>(&Hook_SetResidencyPriority),
+                  &g_dev_originals.SetResidencyPriority);
+
     if (v >= 2)
         PatchSlot(vtable, 47, "CreatePipelineState", reinterpret_cast<void*>(&Hook_CreatePipelineState),
                   &g_dev_originals.CreatePipelineState);

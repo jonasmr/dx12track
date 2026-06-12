@@ -117,6 +117,13 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
                 comma_kv_u64("format",   p->format);
                 comma_kv_u64("size",     p->size_bytes);
                 comma_kv_u64("parent_heap_id", p->parent_heap_id);
+                if (p->parent_heap_ptr) {
+                    char hex[24];
+                    sprintf(hex, "\"0x%llx\"",
+                            (unsigned long long)p->parent_heap_ptr);
+                    out.push_back(','); AppendKey(out, "parent_heap_ptr");
+                    out.append(hex);
+                }
                 out.push_back(','); AppendKey(out, "name");
                 AppendJsonString(out, p->name, kMaxNameChars);
                 if (p->frame_count) {
@@ -209,6 +216,21 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
                 sprintf(hex, "\"0x%llx\"", (unsigned long long)p->base);
                 out.push_back(','); AppendKey(out, "base");
                 out.append(hex);
+            }
+            break;
+        }
+        case EventKind::ResidencyPriority: {
+            out.append("\"residency_priority\"");
+            comma_kv_u64("ts_ns", ts_ns);
+            if (payload_bytes >= sizeof(ResidencyPriorityPayload)) {
+                auto* p = static_cast<const ResidencyPriorityPayload*>(payload);
+                comma_kv_u64("id", p->id);
+                char hex[24];
+                sprintf(hex, "\"0x%llx\"", (unsigned long long)p->object_ptr);
+                out.push_back(','); AppendKey(out, "object_ptr");
+                out.append(hex);
+                comma_kv_u64("priority",      p->priority);
+                comma_kv_str("priority_name", ResidencyPriorityName(p->priority));
             }
             break;
         }

@@ -54,6 +54,7 @@ enum class EventKind : uint8_t {
     ModuleLoaded,    // initial enumeration + LdrRegisterDllNotification
     ModuleUnloaded,
     Diagnostic,      // verbose-mode trace of injection / hook install / per-fire markers
+    ResidencyPriority,  // ID3D12Device1::SetResidencyPriority — one event per object
 };
 
 #pragma pack(push, 1)
@@ -76,7 +77,8 @@ struct HelloPayload {
 struct CreatedPayload {
     uint64_t id;
     uint64_t size_bytes;
-    uint64_t parent_heap_id;   // 0 if not Placed
+    uint64_t parent_heap_id;   // tracker id of the parent heap, 0 if not Placed
+    uint64_t parent_heap_ptr;  // raw IUnknown* of the parent heap, 0 if not Placed
     uint32_t heap_type;        // D3D12_HEAP_TYPE (0 if alloc==None)
     uint32_t dimension;        // D3D12_RESOURCE_DIMENSION (Buffer/Texture*/Unknown)
     uint32_t format;           // DXGI_FORMAT (UNKNOWN for non-resources)
@@ -124,7 +126,29 @@ struct DiagnosticPayload {
     char message[kMaxDiagnosticChars];
 };
 
+// ID3D12Device1::SetResidencyPriority takes parallel arrays of (object, prio).
+// We emit one ResidencyPriority event per object so the wire format stays
+// fixed-size. `id` is 0 if the object's vtable wasn't registered with us
+// (untracked pageable — still log the priority change for completeness).
+struct ResidencyPriorityPayload {
+    uint64_t id;
+    uint64_t object_ptr;      // raw IUnknown* of the pageable for cross-ref
+    uint32_t priority;        // D3D12_RESIDENCY_PRIORITY raw value
+    uint8_t  _pad[4];
+};
+
 #pragma pack(pop)
+
+inline const char* ResidencyPriorityName(uint32_t p) {
+    switch (p) {
+        case 0x28000000u: return "Minimum";
+        case 0x50000000u: return "Low";
+        case 0x78000000u: return "Normal";
+        case 0xa0010000u: return "High";
+        case 0xc8000000u: return "Maximum";
+        default:          return "Custom";
+    }
+}
 
 inline const char* ObjectTypeName(ObjectType t) {
     switch (t) {

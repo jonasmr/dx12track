@@ -2,6 +2,8 @@
 
 #include "Diag.h"
 #include "Hooks.h"
+#include "JsonLog.h"
+#include "PipeClient.h"
 #include "Tracker.h"
 
 #include <cstring>
@@ -73,15 +75,17 @@ ObjectInfo MakeResourceInfo(ID3D12Device* dev,
                              const D3D12_RESOURCE_DESC& desc,
                              AllocationKind alloc,
                              D3D12_HEAP_TYPE heap_type,
-                             uint64_t parent_heap_id) {
+                             uint64_t parent_heap_id,
+                             ID3D12Heap*    parent_heap_ptr = nullptr) {
     ObjectInfo info{};
-    info.type           = ObjectType::Resource;
-    info.alloc          = alloc;
-    info.heap_type      = static_cast<uint32_t>(heap_type);
-    info.dimension      = static_cast<uint32_t>(desc.Dimension);
-    info.format         = static_cast<uint32_t>(desc.Format);
-    info.size_bytes     = ComputeResourceSize(dev, desc);
-    info.parent_heap_id = parent_heap_id;
+    info.type            = ObjectType::Resource;
+    info.alloc           = alloc;
+    info.heap_type       = static_cast<uint32_t>(heap_type);
+    info.dimension       = static_cast<uint32_t>(desc.Dimension);
+    info.format          = static_cast<uint32_t>(desc.Format);
+    info.size_bytes      = ComputeResourceSize(dev, desc);
+    info.parent_heap_id  = parent_heap_id;
+    info.parent_heap_ptr = reinterpret_cast<uint64_t>(parent_heap_ptr);
     return info;
 }
 
@@ -286,7 +290,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource(
         }
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, *pDesc, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap)));
+                               ht, LookupHeapId(pHeap), pHeap));
     }
     return hr;
 }
@@ -343,6 +347,56 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandSignature(
     if (SUCCEEDED(hr))
         Track(reinterpret_cast<IUnknown**>(ppvCommandSignature),
               MakeSimpleInfo(ObjectType::CommandSignature));
+    return hr;
+}
+
+// ===========================================================================
+// ID3D12Device1
+// ===========================================================================
+
+namespace {
+using PFN_SetResidencyPriority = HRESULT (STDMETHODCALLTYPE*)(
+    ID3D12Device1*, UINT, ID3D12Pageable* const*, const D3D12_RESIDENCY_PRIORITY*);
+
+uint64_t ResidencyNowNs() {
+    static LARGE_INTEGER freq{}, start{};
+    if (!freq.QuadPart) {
+        QueryPerformanceFrequency(&freq);
+        QueryPerformanceCounter(&start);
+    }
+    LARGE_INTEGER now; QueryPerformanceCounter(&now);
+    long double ns = (long double)(now.QuadPart - start.QuadPart) * 1e9L /
+                     (long double)freq.QuadPart;
+    return (uint64_t)ns;
+}
+} // namespace
+
+HRESULT STDMETHODCALLTYPE Hook_SetResidencyPriority(
+    ID3D12Device1* This, UINT NumObjects,
+    ID3D12Pageable* const* ppObjects,
+    const D3D12_RESIDENCY_PRIORITY* pPriorities) {
+    NoteFire("SetResidencyPriority");
+    auto fn = reinterpret_cast<PFN_SetResidencyPriority>(
+        DeviceOriginals().SetResidencyPriority);
+    HRESULT hr = fn(This, NumObjects, ppObjects, pPriorities);
+
+    // Emit one event per (object, priority) pair on success. We use the
+    // tracker only for the id lookup — these events aren't object lifecycle
+    // events so the live-object map stays untouched. id==0 if the pageable's
+    // vtable isn't registered (e.g., apps sometimes pass pageables we don't
+    // intercept) — we still log the priority + the raw pointer for cross-ref.
+    if (SUCCEEDED(hr) && ppObjects && pPriorities) {
+        for (UINT i = 0; i < NumObjects; ++i) {
+            auto* obj = static_cast<IUnknown*>(ppObjects[i]);
+            ResidencyPriorityPayload p{};
+            p.id         = GlobalTracker().LookupId(obj);
+            p.object_ptr = reinterpret_cast<uint64_t>(obj);
+            p.priority   = static_cast<uint32_t>(pPriorities[i]);
+            GlobalPipe().Send(EventKind::ResidencyPriority, &p, sizeof(p));
+            GlobalLog().Append(EventKind::ResidencyPriority, ResidencyNowNs(),
+                               &p, sizeof(p));
+        }
+    }
     return hr;
 }
 
@@ -472,7 +526,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource1(
         if (pHeap) ht = pHeap->GetDesc().Properties.Type;
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, d, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap)));
+                               ht, LookupHeapId(pHeap), pHeap));
     }
     return hr;
 }
@@ -540,7 +594,7 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource2(
         if (pHeap) ht = pHeap->GetDesc().Properties.Type;
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, d, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap)));
+                               ht, LookupHeapId(pHeap), pHeap));
     }
     return hr;
 }

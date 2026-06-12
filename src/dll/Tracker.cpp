@@ -149,10 +149,11 @@ void Tracker::OnSetName(IUnknown* obj, const wchar_t* name) {
 
 void Tracker::EmitCreated(const ObjectInfo& info) {
     CreatedPayload p{};
-    p.id             = info.id;
-    p.size_bytes     = info.size_bytes;
-    p.parent_heap_id = info.parent_heap_id;
-    p.heap_type      = info.heap_type;
+    p.id              = info.id;
+    p.size_bytes      = info.size_bytes;
+    p.parent_heap_id  = info.parent_heap_id;
+    p.parent_heap_ptr = info.parent_heap_ptr;
+    p.heap_type       = info.heap_type;
     p.dimension      = info.dimension;
     p.format         = info.format;
     p.type           = info.type;

@@ -69,7 +69,8 @@ the `event` discriminator. The full schema below is a single
     { "$ref": "#/$defs/module_loaded" },
     { "$ref": "#/$defs/module_unloaded" },
     { "$ref": "#/$defs/goodbye" },
-    { "$ref": "#/$defs/diag" }
+    { "$ref": "#/$defs/diag" },
+    { "$ref": "#/$defs/residency_priority" }
   ],
 
   "$defs": {
@@ -109,12 +110,25 @@ the `event` discriminator. The full schema below is a single
         "format":         { "type": "integer", "minimum": 0 },
         "size":           { "type": "integer", "minimum": 0 },
         "parent_heap_id": { "type": "integer", "minimum": 0 },
+        "parent_heap_ptr": { "$ref": "#/$defs/HexAddress" },
         "name":           { "type": "string" },
         "stack": {
           "type": "array",
           "maxItems": 32,
           "items":   { "$ref": "#/$defs/HexAddress" }
         }
+      }
+    },
+
+    "residency_priority": {
+      "type": "object",
+      "required": ["event","ts_ns","id","object_ptr","priority","priority_name"],
+      "properties": {
+        "event":         { "const": "residency_priority" },
+        "id":            { "type": "integer", "minimum": 0 },
+        "object_ptr":    { "$ref": "#/$defs/HexAddress" },
+        "priority":      { "type": "integer" },
+        "priority_name": { "enum": ["Minimum","Low","Normal","High","Maximum","Custom"] }
       }
     },
 
@@ -225,6 +239,10 @@ A D3D12 object was successfully created and registered.
   objects.
 - **`parent_heap_id`**: only non-zero for `alloc == "Placed"` — refers to
   the `id` of the heap the resource was placed into. `0` otherwise.
+- **`parent_heap_ptr`** *(optional)*: only present for `alloc == "Placed"` —
+  the raw `IUnknown*` of the parent heap as a quoted hex string. Useful for
+  cross-referencing with the app's own heap pointers when the tracker `id`
+  isn't visible to the app.
 - **`name`**: empty at creation; populated by subsequent `renamed` events
   that mirror the most-recent `ID3D12Object::SetName` /
   `SetPrivateData(WKPDID_D3DDebugObjectName{,W})` call.
@@ -284,6 +302,28 @@ Last line of a normal run. Absent when the host was force-killed.
 ```jsonl
 {"event":"goodbye","ts_ns":1234567890,"exit_code":0}
 ```
+
+### `residency_priority`
+The app called `ID3D12Device1::SetResidencyPriority` on one or more
+pageables. Emitted **once per object in the call** — a single call setting
+priorities for N objects becomes N events.
+
+```jsonl
+{"event":"residency_priority","ts_ns":123456,"id":42,"object_ptr":"0x1f0a1b2c0","priority":2013265920,"priority_name":"Normal"}
+```
+
+- **`id`**: tracker id of the pageable, or `0` if its vtable wasn't
+  registered (rare — only happens if the app calls SetResidencyPriority on
+  a pageable that came from a code path we don't intercept).
+- **`object_ptr`**: raw `IUnknown*` of the pageable as a hex string. Always
+  populated, useful as a backup id when `id == 0`.
+- **`priority`**: the raw `D3D12_RESIDENCY_PRIORITY` enum value (an
+  `int32`). Microsoft assigns the named tiers at very high numeric values
+  (`Minimum = 0x28000000`, `Normal = 0x78000000`, `Maximum = 0xc8000000`)
+  with the low 16 bits free for app-defined within-tier ordering.
+- **`priority_name`**: convenience string. Apps that use a tier-aligned
+  value get `Minimum`/`Low`/`Normal`/`High`/`Maximum`; anything else maps
+  to `Custom` (you'll want to read `priority` directly in that case).
 
 ### `diag`
 Verbose-mode trace events for diagnosing injection/hook-install issues.

@@ -18,6 +18,7 @@ void PatchDeviceVTable(void* device_iunknown);
 // Storage for the original device-method pointers, keyed by vtable slot.
 // Populated by PatchDeviceVTable, read by the per-method trampolines.
 struct DeviceVtableOriginals {
+    void* SetResidencyPriority        = nullptr;  // slot 46  (Device1)
     void* CreateCommandQueue          = nullptr;  // slot 8
     void* CreateCommandAllocator      = nullptr;  // 9
     void* CreateGraphicsPipelineState = nullptr;  // 10

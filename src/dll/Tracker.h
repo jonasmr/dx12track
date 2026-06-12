@@ -23,6 +23,7 @@ struct ObjectInfo {
     uint32_t       format;
     uint64_t       size_bytes;
     uint64_t       parent_heap_id;
+    uint64_t       parent_heap_ptr = 0;  // raw IUnknown* for placed resources
     std::wstring   name;
 
     // Populated by hooks when --callstacks is enabled; frame_count == 0 means
