@@ -5,6 +5,7 @@
 #define DX12TRACK_BUILDING_DLL
 #include "dx12track.h"
 
+#include "Clock.h"
 #include "EventTypes.h"
 #include "JsonLog.h"
 #include "Modules.h"
@@ -22,8 +23,8 @@ void SendHelloToLog() {
     HelloPayload p{};
     p.protocol_version = kProtocolVersion;
     p.pid = GetCurrentProcessId();
-    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
-    p.qpc_frequency = (uint64_t)f.QuadPart;
+    p.qpc_frequency = QpcFrequency();
+    p.qpc_start     = QpcStart();
     wchar_t buf[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, buf, MAX_PATH);
     size_t n = wcsnlen(buf, kMaxNameChars - 1);

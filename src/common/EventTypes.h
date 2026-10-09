@@ -15,7 +15,7 @@
 namespace dx12track {
 
 constexpr uint32_t kProtocolMagic       = 0x44583132; // 'DX12'
-constexpr uint32_t kProtocolVersion     = 3;
+constexpr uint32_t kProtocolVersion     = 4;
 constexpr size_t   kMaxNameChars        = 256;
 constexpr size_t   kMaxCallstackFrames  = 32;
 constexpr size_t   kMaxDiagnosticChars  = 512;
@@ -71,6 +71,8 @@ struct HelloPayload {
     uint32_t protocol_version;
     uint32_t pid;
     uint64_t qpc_frequency;
+    uint64_t qpc_start;        // QPC value at ts_ns == 0 (v4). Lets consumers put raw-QPC
+                               // data (e.g. ETW timestamps) on the ts_ns timeline.
     wchar_t  exe_path[kMaxNameChars];
 };
 
@@ -79,6 +81,8 @@ struct CreatedPayload {
     uint64_t size_bytes;
     uint64_t parent_heap_id;   // tracker id of the parent heap, 0 if not Placed
     uint64_t parent_heap_ptr;  // raw IUnknown* of the parent heap, 0 if not Placed
+    uint64_t object_ptr;       // (v4) the interface pointer the app received from Create*
+                               // (*ppv, not QI'd). Equals the D3D12 ETW object address.
     uint32_t heap_type;        // D3D12_HEAP_TYPE (0 if alloc==None)
     uint32_t dimension;        // D3D12_RESOURCE_DIMENSION (Buffer/Texture*/Unknown)
     uint32_t format;           // DXGI_FORMAT (UNKNOWN for non-resources)

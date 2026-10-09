@@ -1,26 +1,11 @@
 #include "PipeClient.h"
 
+#include "Clock.h"
+
 #include <chrono>
 #include <thread>
 
 namespace dx12track {
-
-namespace {
-LARGE_INTEGER g_qpc_freq{};
-LARGE_INTEGER g_qpc_start{};
-
-uint64_t NowNs() {
-    if (!g_qpc_freq.QuadPart) {
-        QueryPerformanceFrequency(&g_qpc_freq);
-        QueryPerformanceCounter(&g_qpc_start);
-    }
-    LARGE_INTEGER now; QueryPerformanceCounter(&now);
-    LONGLONG delta = now.QuadPart - g_qpc_start.QuadPart;
-    // ns = delta * 1e9 / freq, computed without overflow for typical freqs.
-    long double ns = (long double)delta * 1e9L / (long double)g_qpc_freq.QuadPart;
-    return (uint64_t)ns;
-}
-} // namespace
 
 bool PipeClient::Connect(const std::wstring& pipe_name, DWORD retry_ms) {
     using namespace std::chrono;

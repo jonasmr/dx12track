@@ -1,3 +1,4 @@
 [submodule "external/DxTimingCaptureLibrary"]
 	path = external/DxTimingCaptureLibrary
-	url = git@github.com:microsoft/DxTimingCaptureLibrary.git
+	url = git@github.com:jonasmr/DxTimingCaptureLibrary.git
+	branch = dx12track

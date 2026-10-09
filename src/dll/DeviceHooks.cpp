@@ -1,5 +1,6 @@
 #include "DeviceHooks.h"
 
+#include "Clock.h"
 #include "Diag.h"
 #include "Hooks.h"
 #include "JsonLog.h"
@@ -357,18 +358,6 @@ HRESULT STDMETHODCALLTYPE Hook_CreateCommandSignature(
 namespace {
 using PFN_SetResidencyPriority = HRESULT (STDMETHODCALLTYPE*)(
     ID3D12Device1*, UINT, ID3D12Pageable* const*, const D3D12_RESIDENCY_PRIORITY*);
-
-uint64_t ResidencyNowNs() {
-    static LARGE_INTEGER freq{}, start{};
-    if (!freq.QuadPart) {
-        QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&start);
-    }
-    LARGE_INTEGER now; QueryPerformanceCounter(&now);
-    long double ns = (long double)(now.QuadPart - start.QuadPart) * 1e9L /
-                     (long double)freq.QuadPart;
-    return (uint64_t)ns;
-}
 } // namespace
 
 HRESULT STDMETHODCALLTYPE Hook_SetResidencyPriority(
@@ -393,7 +382,7 @@ HRESULT STDMETHODCALLTYPE Hook_SetResidencyPriority(
             p.object_ptr = reinterpret_cast<uint64_t>(obj);
             p.priority   = static_cast<uint32_t>(pPriorities[i]);
             GlobalPipe().Send(EventKind::ResidencyPriority, &p, sizeof(p));
-            GlobalLog().Append(EventKind::ResidencyPriority, ResidencyNowNs(),
+            GlobalLog().Append(EventKind::ResidencyPriority, NowNs(),
                                &p, sizeof(p));
         }
     }

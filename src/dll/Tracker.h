@@ -24,6 +24,7 @@ struct ObjectInfo {
     uint64_t       size_bytes;
     uint64_t       parent_heap_id;
     uint64_t       parent_heap_ptr = 0;  // raw IUnknown* for placed resources
+    uint64_t       object_ptr = 0;       // the pointer the app got from Create* (set by Register)
     std::wstring   name;
 
     // Populated by hooks when --callstacks is enabled; frame_count == 0 means

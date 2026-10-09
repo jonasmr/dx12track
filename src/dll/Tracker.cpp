@@ -1,5 +1,6 @@
 #include "Tracker.h"
 
+#include "Clock.h"
 #include "Diag.h"
 #include "JsonLog.h"
 #include "ObjectHooks.h"
@@ -15,7 +16,7 @@ namespace {
 
 // IUnknown::Release lives at vtable index 2; ID3D12Object::SetPrivateData at 4;
 // ID3D12Object::SetName at 6. (Slots 0/1 are QueryInterface/AddRef, 3 is
-// GetPrivateData, 5 is SetPrivateDataInterface — none of those carry names.)
+// GetPrivateData, 5 is SetPrivateDataInterface â€” none of those carry names.)
 constexpr size_t kSlot_Release        = 2;
 constexpr size_t kSlot_SetPrivateData = 4;
 constexpr size_t kSlot_SetName        = 6;
@@ -30,18 +31,6 @@ void* PatchSlot(void** vtable, size_t index, void* new_fn) {
     DWORD ignored = 0;
     VirtualProtect(&vtable[index], sizeof(void*), old, &ignored);
     return prev;
-}
-
-uint64_t NowNsForJson() {
-    static LARGE_INTEGER freq{}, start{};
-    if (!freq.QuadPart) {
-        QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&start);
-    }
-    LARGE_INTEGER now; QueryPerformanceCounter(&now);
-    long double ns = (long double)(now.QuadPart - start.QuadPart) * 1e9L /
-                     (long double)freq.QuadPart;
-    return (uint64_t)ns;
 }
 
 } // namespace
@@ -103,6 +92,10 @@ uint64_t Tracker::Register(IUnknown* obj, ObjectInfo info) {
     PatchVTableIfNew(obj);
 
     info.id = next_id_.fetch_add(1, std::memory_order_relaxed);
+    // `obj` is *ppv exactly as the app received it (Track() only reinterprets
+    // the pointer, it never QIs). That's the address D3D12's ETW provider
+    // reports, so it's the join key for the launcher's --etw mode.
+    info.object_ptr = reinterpret_cast<uint64_t>(obj);
 
     {
         std::lock_guard<std::mutex> lock(mu_);
@@ -153,6 +146,7 @@ void Tracker::EmitCreated(const ObjectInfo& info) {
     p.size_bytes      = info.size_bytes;
     p.parent_heap_id  = info.parent_heap_id;
     p.parent_heap_ptr = info.parent_heap_ptr;
+    p.object_ptr      = info.object_ptr;
     p.heap_type       = info.heap_type;
     p.dimension      = info.dimension;
     p.format         = info.format;
@@ -168,7 +162,7 @@ void Tracker::EmitCreated(const ObjectInfo& info) {
                info.frame_count * sizeof(uint64_t));
 
     GlobalPipe().Send(EventKind::Created, &p, sizeof(p));
-    GlobalLog().Append(EventKind::Created, NowNsForJson(), &p, sizeof(p));
+    GlobalLog().Append(EventKind::Created, NowNs(), &p, sizeof(p));
 }
 
 void Tracker::EmitRenamed(uint64_t id, const wchar_t* name) {
@@ -180,13 +174,13 @@ void Tracker::EmitRenamed(uint64_t id, const wchar_t* name) {
         p.name[n] = 0;
     }
     GlobalPipe().Send(EventKind::Renamed, &p, sizeof(p));
-    GlobalLog().Append(EventKind::Renamed, NowNsForJson(), &p, sizeof(p));
+    GlobalLog().Append(EventKind::Renamed, NowNs(), &p, sizeof(p));
 }
 
 void Tracker::EmitDestroyed(uint64_t id) {
     DestroyedPayload p{}; p.id = id;
     GlobalPipe().Send(EventKind::Destroyed, &p, sizeof(p));
-    GlobalLog().Append(EventKind::Destroyed, NowNsForJson(), &p, sizeof(p));
+    GlobalLog().Append(EventKind::Destroyed, NowNs(), &p, sizeof(p));
 }
 
 Tracker& GlobalTracker() {

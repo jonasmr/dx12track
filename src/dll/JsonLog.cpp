@@ -99,6 +99,7 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
                 comma_kv_u64("pid", p->pid);
                 comma_kv_u64("protocol", p->protocol_version);
                 comma_kv_u64("qpc_freq", p->qpc_frequency);
+                comma_kv_u64("qpc_start", p->qpc_start);
                 out.push_back(','); AppendKey(out, "exe");
                 AppendJsonString(out, p->exe_path, kMaxNameChars);
             }
@@ -110,6 +111,12 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
             if (payload_bytes >= sizeof(CreatedPayload)) {
                 auto* p = static_cast<const CreatedPayload*>(payload);
                 comma_kv_u64("id",       p->id);
+                {
+                    char hex[24];
+                    sprintf(hex, "\"0x%llx\"", (unsigned long long)p->object_ptr);
+                    out.push_back(','); AppendKey(out, "ptr");
+                    out.append(hex);
+                }
                 comma_kv_str("type",     ObjectTypeName(p->type));
                 comma_kv_str("alloc",    AllocationKindName(p->alloc));
                 comma_kv_str("heap",     HeapTypeName(p->heap_type));

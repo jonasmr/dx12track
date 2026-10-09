@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  dx12track_etw.lib: dx12track's ETW consumer (EtwMonitor.cpp) compiled together
+  with DxTimingCaptureLibrary's own sources, taken unmodified from the
+  external/DxTimingCaptureLibrary submodule. Linked into the launcher.
+
+  Why a separate project:
+  - The library needs C++20 and the Agility SDK NuGet headers (unprefixed
+    <d3d12.h>, <D3D12Events.h>); the rest of dx12track is C++17 on vcpkg's
+    <directx/d3d12.h>. Keeping them in different TUs/projects avoids mixing two
+    d3d12.h versions.
+  - The library's own lib\DxTimingCaptureLibrary.lib.vcxproj writes into the
+    submodule and uses the DLL CRT; here everything lands under build\ and uses
+    the launcher's static CRT (/MT, /MTd).
+
+  Requires NuGet restore (msbuild /restore, or VS does it automatically) for
+  the Microsoft.Direct3D.D3D12 package the library's Directory.Build.props
+  references.
+-->
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <ProjectGuid>{4E1F0A11-7E9C-4A55-9D43-6F1A2C7B0003}</ProjectGuid>
+    <RootNamespace>dx12track_etw</RootNamespace>
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <Dx12TrackRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</Dx12TrackRoot>
+    <!-- NuGet restore output (project.assets.json, nuget.g.props/targets) goes
+         under build\ instead of src\etw\obj\. Must be set before
+         Microsoft.Cpp.Default.props (which imports Microsoft.Common.props). -->
+    <BaseIntermediateOutputPath>$(Dx12TrackRoot)build\nuget\etw\</BaseIntermediateOutputPath>
+    <!-- ResolveNuGetPackageAssets only knows managed assemblies and fails on C++
+         projects with "Sequence contains no elements". The package is consumed
+         through its build\native .props/.targets, which restore imports. -->
+    <ResolveNuGetPackages>false</ResolveNuGetPackages>
+    <!-- The library resolves <d3d12.h> from the Agility NuGet package; keep
+         vcpkg's DirectX-Headers off this project's include path. -->
+    <VcpkgEnabled>false</VcpkgEnabled>
+    <VcpkgEnableManifest>false</VcpkgEnableManifest>
+    <!-- Headers only; don't copy D3D12Core.dll / SDK layers anywhere. -->
+    <Microsoft_Direct3D_D3D12_SkipLibraryCopy>true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
+    <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
+  </PropertyGroup>
+
+  <!-- The library's standalone build settings: x64 Debug/Release configurations,
+       toolset, Windows SDK, C++20, include dirs (include\, third_party\dxgk,
+       third_party\directstorage) and the Microsoft.Direct3D.D3D12 1.619.5
+       PackageReference. Must come after ConfigurationType and before
+       Microsoft.Cpp.Default.props. -->
+  <Import Project="$(Dx12TrackRoot)external\DxTimingCaptureLibrary\Directory.Build.props" />
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)'=='Debug'" Label="Configuration">
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)'=='Release'" Label="Configuration">
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <PropertyGroup>
+    <OutDir>$(Dx12TrackRoot)build\x64\$(Configuration)\lib\</OutDir>
+    <IntDir>$(Dx12TrackRoot)build\x64\$(Configuration)\obj\etw\</IntDir>
+    <TargetName>dx12track_etw</TargetName>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <PrecompiledHeader>NotUsing</PrecompiledHeader>
+      <WarningLevel>Level3</WarningLevel>
+      <SDLCheck>true</SDLCheck>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <!-- The library's public headers also need the PixEventDecoder headers. -->
+      <AdditionalIncludeDirectories>$(PixEventDecoderPath)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <PreprocessorDefinitions>_DEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <PreprocessorDefinitions>NDEBUG;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemGroup>
+    <ClCompile Include="EtwMonitor.cpp" />
+    <ClInclude Include="EtwMonitor.h" />
+  </ItemGroup>
+
+  <!-- DxTimingCaptureLibrary (same sources as its lib\DxTimingCaptureLibrary.lib.vcxproj).
+       4996 (<codecvt> deprecation) and 4309 (constant truncation) come from the
+       library's own code; suppressed for these files only. -->
+  <ItemGroup>
+    <ClCompile Include="$(DxTimingCaptureLibraryRoot)\lib\AllocationTracker.cpp">
+      <DisableSpecificWarnings>4996;4309;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+    <ClCompile Include="$(DxTimingCaptureLibraryRoot)\lib\D3D12ObjectProcessor.cpp">
+      <DisableSpecificWarnings>4996;4309;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+    <ClCompile Include="$(DxTimingCaptureLibraryRoot)\lib\DxTimingCaptureEventHandler.cpp">
+      <DisableSpecificWarnings>4996;4309;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+    <ClCompile Include="$(DxTimingCaptureLibraryRoot)\lib\PixEventDecoderStub.cpp" Condition="'$(UseStubPixEventDecoder)' == 'true'">
+      <DisableSpecificWarnings>4996;4309;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <SDLCheck>false</SDLCheck>
+    </ClCompile>
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>

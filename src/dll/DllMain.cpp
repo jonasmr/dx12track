@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <string>
 
+#include "Clock.h"
 #include "Diag.h"
 #include "EventTypes.h"
 #include "Hooks.h"
@@ -27,8 +28,8 @@ void SendHello() {
     dx12track::HelloPayload p{};
     p.protocol_version = dx12track::kProtocolVersion;
     p.pid = GetCurrentProcessId();
-    LARGE_INTEGER f; QueryPerformanceFrequency(&f);
-    p.qpc_frequency = (uint64_t)f.QuadPart;
+    p.qpc_frequency = dx12track::QpcFrequency();
+    p.qpc_start     = dx12track::QpcStart();
     wchar_t buf[MAX_PATH] = {};
     GetModuleFileNameW(nullptr, buf, MAX_PATH);
     size_t n = wcsnlen(buf, dx12track::kMaxNameChars - 1);
@@ -77,6 +78,9 @@ void WaitForDebuggerIfRequested() {
 }
 
 void OnAttach() {
+    // Pin ts_ns == 0 before anything can emit an event.
+    dx12track::InitClock();
+
     std::wstring pipe_name  = EnvW(L"DX12TRACK_PIPE");
     std::wstring json_path  = EnvW(L"DX12TRACK_JSON");
     std::wstring callstacks = EnvW(L"DX12TRACK_CALLSTACKS");

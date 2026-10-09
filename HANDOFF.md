@@ -1,5 +1,32 @@
 # dx12track — handoff notes
 
+## Update 2026-10-09: `--etw` (DxTimingCaptureLibrary integration)
+
+- New launcher flag `--etw`: real-time ETW session (Direct3D12 + DxgKrnl)
+  decoded by `external/DxTimingCaptureLibrary` (submodule, branch
+  `dx12track`, our fork with `ApiObjectCallbacks::OnApiObjectAddress` +
+  Austin Kinross's residency fix). Adds per-object VRAM/sys location,
+  driver sizes (PSOs, descriptor heaps), per-process memory counters and a
+  sidecar log `<log>.etw.jsonl`. See README "Memory location via ETW" and
+  FORMAT.md "ETW sidecar".
+- Code: `src/etw/` (static lib, C++20, the only TUs that include the
+  library / Agility NuGet `d3d12.h`), join logic in `src/launcher/Model.cpp`
+  (`EtwOnCreated`, `OnEtwObjectAddress`, `TryBindEtw`, ...), console in
+  `Renderer.cpp`, session lifecycle in `Main.cpp`.
+- Protocol bumped to **4**: `created.ptr` (app-visible interface pointer =
+  ETW object address) and `hello.qpc_start`. The DLL now has a single clock
+  (`src/dll/Clock.cpp`) for every `ts_ns`.
+- Build now needs `git submodule update --init` and `msbuild /restore`
+  (NuGet `Microsoft.Direct3D.D3D12` 1.619.5 for the library).
+- `--dump-console <file>` writes the console frame as text (for automated
+  runs).
+- Known, pre-existing (not caused by this work): ModelViewer (Debug) exits
+  with 0xC0000005 in roughly half the runs, with HEAD binaries too; parallel
+  builds (`/m`) can fail with LNK1201 because the launcher and the DLL both
+  have TargetName `dx12track` and write the same `dx12track.pdb`.
+- `.gitmodules` points at the fork (`jonasmeyeriracing/DxTimingCaptureLibrary`,
+  branch `dx12track`) — still an uncommitted change at the time of writing.
+
 Snapshot taken 2026-06-01 while moving the working environment between
 machines. This document records everything that lives *outside* the git repo
 or that's easy to miss when picking the project back up cold. For "what is
@@ -176,7 +203,7 @@ after opening the log so the JSONL always leads with a `hello`.
 
 ```
 src/
-  common/EventTypes.h          Wire format (protocol v2). Single source of truth
+  common/EventTypes.h          Wire format (protocol v4). Single source of truth
                                shared between launcher (consumer) and DLL (producer).
                                Includes #pragma pack(push,1) payloads for every
                                EventKind plus enum/name helpers.
@@ -187,7 +214,12 @@ src/
     PipeServer.cpp/.h          Server side of the per-PID named pipe
     Model.cpp/.h               Live object table + memory totals + recent tail
     Renderer.cpp/.h            WriteConsoleOutputW back-buffer renderer
+  etw/
+    EtwMonitor.cpp/.h          --etw: ETW session + DxTimingCaptureLibrary
+                               handler; plain-type Sink interface to Model
+    dx12track_etw.vcxproj      static lib, C++20, library sources compiled in
   dll/
+    Clock.cpp/.h               the single ts_ns clock (QpcStart() goes in Hello)
     DllMain.cpp                Bootstraps env-var-driven config (launcher path)
     Hooks.cpp/.h               MinHook on D3D12CreateDevice; vtable probe up to
                                ID3D12Device15 (#ifdef-guarded); installs the per-slot

@@ -1,5 +1,6 @@
 #include "Modules.h"
 
+#include "Clock.h"
 #include "EventTypes.h"
 #include "JsonLog.h"
 #include "PipeClient.h"
@@ -57,18 +58,6 @@ namespace {
 std::atomic<bool> g_started{false};
 PVOID             g_cookie = nullptr;
 PFN_LdrUnregisterDllNotification g_unregister = nullptr;
-
-uint64_t NowNs() {
-    static LARGE_INTEGER freq{}, start{};
-    if (!freq.QuadPart) {
-        QueryPerformanceFrequency(&freq);
-        QueryPerformanceCounter(&start);
-    }
-    LARGE_INTEGER now; QueryPerformanceCounter(&now);
-    long double ns = (long double)(now.QuadPart - start.QuadPart) * 1e9L /
-                     (long double)freq.QuadPart;
-    return (uint64_t)ns;
-}
 
 // Locate the IMAGE_NT_HEADERS in a module mapped at `base`.
 const IMAGE_NT_HEADERS* NtHeaders(const void* base) {
