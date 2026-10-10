@@ -20,7 +20,11 @@ public:
 
     // Allocate a fresh pipe name and create the server-side pipe handle.
     // Returns the full \\.\pipe\... name to expose to the child via env var.
-    bool Create(std::wstring* out_pipe_name);
+    // The pipe is writable by the current user (plus `extra_client_sid`, if
+    // given) at medium integrity, so a non-elevated target can connect to an
+    // elevated launcher.
+    bool Create(std::wstring* out_pipe_name,
+                const std::wstring& extra_client_sid = std::wstring());
 
     // Wait (blocking, with timeout) for the injected DLL to connect, then
     // start a background reader thread that dispatches events into `model`.

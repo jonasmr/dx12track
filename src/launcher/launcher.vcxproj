@@ -50,7 +50,7 @@
     <Link>
       <SubSystem>Console</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>kernel32.lib;user32.lib;advapi32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>kernel32.lib;user32.lib;advapi32.lib;shell32.lib;ole32.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -79,12 +79,14 @@
     <ClCompile Include="PipeServer.cpp" />
     <ClCompile Include="Model.cpp" />
     <ClCompile Include="Renderer.cpp" />
+    <ClCompile Include="Elevation.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="Injector.h" />
     <ClInclude Include="PipeServer.h" />
     <ClInclude Include="Model.h" />
     <ClInclude Include="Renderer.h" />
+    <ClInclude Include="Elevation.h" />
   </ItemGroup>
   <ItemGroup>
     <!-- For the etw option: ETW consumer + DxTimingCaptureLibrary (C++20, static CRT). -->

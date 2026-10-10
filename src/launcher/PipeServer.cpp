@@ -1,8 +1,11 @@
 #include "PipeServer.h"
 
+#include "Elevation.h"
 #include "Model.h"
 
 #include <cstdio>
+#include <cwchar>
+#include <sddl.h>
 #include <sstream>
 
 namespace dx12track {
@@ -32,11 +35,32 @@ PipeServer::~PipeServer() {
         CloseHandle(pipe_handle_);
 }
 
-bool PipeServer::Create(std::wstring* out_pipe_name) {
+bool PipeServer::Create(std::wstring* out_pipe_name,
+                        const std::wstring& extra_client_sid) {
     std::wostringstream s;
     s << L"\\\\.\\pipe\\dx12track-" << GetCurrentProcessId() << L"-"
       << GetTickCount();
     pipe_name_ = s.str();
+
+    // Explicit security descriptor: the default one of an elevated launcher
+    // only lets SYSTEM/Administrators write, so the DLL in a non-elevated
+    // target couldn't connect. Grant our user (+ the original launcher's user
+    // when UAC elevated with other credentials), Administrators and SYSTEM,
+    // and label the pipe medium integrity (no-write-up) so a medium-IL client
+    // may open it for writing.
+    std::wstring sddl = L"D:P(A;;GA;;;SY)(A;;GA;;;BA)";
+    const std::wstring me = CurrentUserSid();
+    if (!me.empty()) sddl += L"(A;;GA;;;" + me + L")";
+    if (!extra_client_sid.empty() && _wcsicmp(extra_client_sid.c_str(), me.c_str()) != 0)
+        sddl += L"(A;;GA;;;" + extra_client_sid + L")";
+    sddl += L"S:(ML;;NW;;;ME)";
+    PSECURITY_DESCRIPTOR sd = nullptr;
+    SECURITY_ATTRIBUTES sa{};
+    if (!me.empty() && ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl.c_str(), SDDL_REVISION_1, &sd, nullptr)) {
+        sa.nLength = sizeof(sa);
+        sa.lpSecurityDescriptor = sd;
+    }
 
     pipe_handle_ = CreateNamedPipeW(
         pipe_name_.c_str(),
@@ -46,7 +70,15 @@ bool PipeServer::Create(std::wstring* out_pipe_name) {
         0,                    // out buffer (unused — inbound only)
         4 * 1024 * 1024,      // in buffer (see below)
         0,
-        nullptr);
+        sd ? &sa : nullptr);
+    if (sd) LocalFree(sd);
+    if (pipe_handle_ == INVALID_HANDLE_VALUE && sd) {
+        // E.g. a launcher below medium integrity may not apply the medium
+        // label; fall back to the default descriptor.
+        pipe_handle_ = CreateNamedPipeW(pipe_name_.c_str(), PIPE_ACCESS_INBOUND,
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT, 1, 0,
+            4 * 1024 * 1024, 0, nullptr);
+    }
     // 4 MiB in-buffer. Under --callstacks the DLL's DllMain dumps a
     // ModuleLoaded event for every module already loaded in the target
     // (often 200+ for real games, ~1 KiB per event); meanwhile the launcher

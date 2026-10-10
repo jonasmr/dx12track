@@ -1,5 +1,20 @@
 # dx12track — handoff notes
 
+## Update 2026-10-10: UAC elevation for `--etw`
+
+- Non-elevated `--etw` runs relaunch the launcher elevated (UAC prompt) and
+  wait for it; the target is still created non-elevated (parent-process
+  attribute = the original launcher). Declined/failed: continues without
+  ETW. `--no-elevate` opts out (enough for Performance Log Users). Code in
+  `src/launcher/Elevation.{h,cpp}`, flow at the top of `wmain`; README
+  "Elevation (UAC)".
+- Internal argument `--elevated-by <pid>` (must be argv[1]): re-parents the
+  target to `<pid>` and attaches to that process's console. Usable without
+  UAC to test the re-parenting path, e.g. with the pid of a hidden `cmd.exe`.
+- The pipe now always gets an explicit DACL + medium integrity label.
+- Startup line `target pid N runs non-elevated (medium integrity)` (from the
+  child's token).
+
 ## Update 2026-10-09: `--etw` (DxTimingCaptureLibrary integration)
 
 - New launcher flag `--etw`: real-time ETW session (Direct3D12 + DxgKrnl)

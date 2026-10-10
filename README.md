@@ -49,8 +49,9 @@ Outputs:
 ### Mode 1: launcher-based injection
 
 ```
-dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger] [--etw]
-              [--dump-console <file>] [--] <target.exe> [target args...]
+dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger]
+              [--etw [--no-elevate]] [--dump-console <file>]
+              [--] <target.exe> [target args...]
 ```
 
 `dx12track.exe` does `CreateProcess(CREATE_SUSPENDED)` on the target, injects
@@ -81,10 +82,14 @@ logging — see [Callstacks](#callstacks) below.
 
 `--etw` adds per-object memory location (VRAM / system memory) and driver
 memory sizes from ETW — see [Memory location via ETW](#memory-location-via-etw---etw).
+It asks for elevation (UAC) — see [Elevation](#elevation-uac).
 
 `--dump-console <file>` is a debugging aid: the launcher also writes the
 console frame as plain text to `<file>` (once per second and at exit), so
 automated runs without a real console can see what would be drawn.
+
+At startup the launcher logs the target's elevation, read from its token,
+e.g. `target pid 1234 runs non-elevated (medium integrity)`.
 
 ### Mode 2: in-process self-injection
 
@@ -131,10 +136,47 @@ so it sees every object from the device on.
 
 **Requirements:** administrator rights or membership in the
 **Performance Log Users** group (sign out and in after adding yourself).
+By default a non-elevated `--etw` run asks for elevation, see
+[Elevation](#elevation-uac); `--no-elevate` skips that for group members.
 If the session can't start, the launcher prints why and continues without
 ETW: access denied → the group/admin requirement; error 1460 (timeout) →
 another process using D3D12 (browsers, overlays, streaming tools) didn't
 answer the provider-enable request; retry or close those apps.
+
+### Elevation (UAC)
+
+`dx12track.exe --etw ...` started from a non-elevated console shows a UAC
+prompt and relaunches itself elevated with the same arguments and working
+directory (relative paths such as the default `dx12track.jsonl` resolve
+against the directory you started it in). The original instance waits for
+the elevated one and returns its exit code.
+
+- **The target still runs non-elevated.** The elevated launcher creates it
+  with the original (non-elevated) launcher as its parent process, so it
+  gets your normal token and environment. The DLL in the target connects to
+  the elevated launcher through a pipe that grants your user access at
+  medium integrity. Only the ETW session and the console run elevated.
+- **You started dx12track elevated** (an "Administrator" console): no
+  prompt, and the target runs elevated, as before. Without `--etw` nothing
+  changes either: no prompt, the target gets the launcher's token.
+- **UAC declined (or elevation failed):** the launcher prints why and
+  continues in the original console without ETW (normal tracking; the
+  console and the final summary say `ETW: not used (UAC elevation
+  declined)`).
+- **Console:** the elevated instance attaches to your original console and
+  draws there. If it can't, it opens a console window of its own; the
+  original console says so and, once the elevated instance exits, prints its
+  text output (startup lines, final summary). Ctrl+C in the original console
+  reaches the elevated instance (stops the ETW session and exits).
+- If you redirect the launcher's output (`> out.txt`), the elevated
+  instance's output still goes to the console, not the file; use
+  `--dump-console <file>` for automated runs, or `--no-elevate`.
+- `--no-elevate`: never ask; for members of Performance Log Users, who can
+  run the session without admin (the launcher mentions it in the prompt
+  message when you are one).
+
+The startup line `target pid N runs non-elevated (medium integrity)` shows
+which token the target got.
 
 What it adds:
 
@@ -273,6 +315,16 @@ To resolve symbols offline:
   launcher's `Model` implements its callback interface and does the join
   under the same mutex as the pipe events; per-location byte totals are
   maintained incrementally so snapshots stay cheap.
+- **Elevation**: `src/launcher/Elevation.cpp`. A non-elevated `--etw` run
+  relaunches itself via `ShellExecuteEx("runas")` with the internal first
+  argument `--elevated-by <pid>`; a named mapping
+  (`Local\dx12track-handoff-<pid>`) carries the original's cwd, user SID
+  and environment over, and the console state / forwarded text back. The
+  elevated instance creates the target with
+  `PROC_THREAD_ATTRIBUTE_PARENT_PROCESS` = the original launcher (so it
+  inherits that non-elevated token) and an explicit environment block. The
+  pipe always has an explicit DACL (SYSTEM, Administrators, the user) and a
+  medium mandatory label.
 
 ## Out of scope (today)
 
