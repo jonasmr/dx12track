@@ -50,7 +50,8 @@ Outputs:
 
 ```
 dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger]
-              [--etw [--no-elevate]] [--dump-console <file>]
+              [--etw [--no-elevate] [--etw-rundown <seconds>]]
+              [--dump-console <file>]
               [--] <target.exe> [target args...]
 ```
 
@@ -83,6 +84,9 @@ logging — see [Callstacks](#callstacks) below.
 `--etw` adds per-object memory location (VRAM / system memory) and driver
 memory sizes from ETW — see [Memory location via ETW](#memory-location-via-etw---etw).
 It asks for elevation (UAC) — see [Elevation](#elevation-uac).
+`--etw-rundown <seconds>` adds periodic D3D12 rundowns for pipeline-state
+sizes (off by default: crash risk) — see
+[Periodic rundowns](#periodic-rundowns---etw-rundown-seconds).
 
 `--dump-console <file>` is a debugging aid: the launcher also writes the
 console frame as plain text to `<file>` (once per second and at exit), so
@@ -204,14 +208,39 @@ What it adds:
   [FORMAT.md](FORMAT.md#etw-sidecar-logetwjsonl).
 - **Final summary**: ETW events received / lost, binds, what stayed unbound.
 
-Every 10 s the launcher requests a D3D12 rundown, because pipeline-state
-driver sizes are only reported that way.
+### Periodic rundowns (`--etw-rundown <seconds>`)
 
-Limitations:
+A D3D12 *rundown* (ETW capture state) makes every D3D12 process re-log all
+its live objects. It's the only way a live pipeline state reports its
+driver size; otherwise a PSO's size only arrives when it is destroyed.
 
-- Pipeline-state sizes are approximate: they only arrive with a rundown,
-  and drivers pool PSO memory (several PSOs share an allocation), so many
-  PSOs report no size at all.
+**Off by default**, because a rundown can crash the target. The rundown runs
+on a D3D12 thread inside the target, concurrently with the app. In one
+`--etw` test run (vram-timing, with a rundown every 10 s) it crashed the
+target: the rundown thread
+(`D3D12Core!CDevice::ETWRundown` → `CPageable<ID3D12Heap1>::LogEtwAllocationInfo<CHeap>`
+→ `CDevice::GetEtwAllocationInfoImpl`) raced with a heap being destroyed on
+another thread (`CHeap::LUCPrepareForDestruction`, blocked on the SRW lock the
+rundown held), and the NVIDIA driver (`nvwgf2umx`) faulted on a null read.
+Games destroy resources all the time, so this can hit at any point of a run.
+The single capture-state request issued when the session starts is kept:
+it happens while the target is still suspended, before any D3D12 object
+exists.
+
+- **Without `--etw-rundown`** (default): no rundowns. Locations, residency,
+  descriptor-heap sizes and counters are unaffected. Pipeline states get a
+  size only when they are destroyed, so the console's **Driver memory**
+  section shows live PSOs mostly as unsized (`Sized` ≈ 0, with the hint
+  `(--etw-rundown for sizes)`), and `untracked` includes their memory.
+- **`--etw-rundown <seconds>`** (≥ 1, requires `--etw`): the launcher
+  requests a rundown at that interval (10 was the old default), so live
+  PSOs get sizes. Accept the crash risk above; prefer long intervals.
+
+### `--etw` limitations
+
+- Pipeline-state sizes are approximate: they only arrive with a rundown
+  (`--etw-rundown`) or at destruction, and drivers pool PSO memory (several
+  PSOs share an allocation), so many PSOs report no size at all.
 - Command-allocator sizes are always 0 in practice (shown as `n/a`).
 - CPU-only (non-shader-visible) descriptor heaps are never reported by ETW:
   no location, no size.
@@ -222,8 +251,18 @@ Limitations:
   (`"late":true`).
 - Reserved (tiled) resources have no location.
 - Counters are the kernel's raw values; one-sample dips happen.
-- When the target is killed, location changes after its exit time (process
-  teardown) are ignored.
+- Location changes, residency operations and memory-counter samples
+  stamped after the target began exiting are ignored (the first two counted
+  as `post_exit_ignored`): when a process is killed (or exits still holding
+  GPU memory), the kernel moves its remaining GPU memory to system memory
+  while tearing it down — for several hundred ms, *before* the process's
+  recorded exit time — which would otherwise show everything in `Sys` at
+  the end. The cutoff is the last
+  time the launcher saw the target running: it samples the target's exit
+  code (set before that teardown starts) about every 100 ms and whenever an
+  ETW event is newer than the last sample. A sidecar `target_exiting` line
+  records it. (A target that exits with code 259 = `STILL_ACTIVE` falls back
+  to its recorded exit time.)
 - The ETW session sees every D3D12 process on the machine (the library
   filters by pid), so a busy system costs some launcher CPU.
 - One session per launcher (`dx12track-etw-<launcher pid>`); stale sessions

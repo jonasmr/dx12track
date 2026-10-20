@@ -402,6 +402,7 @@ typically runs ~1 s behind the pipe, so lines are **not** sorted by `ts_ns`.
 etw_hello                       (always first)
 etw_object / etw_bind / location / driver_size / residency /
 etw_object_destroyed / counters (1 per second) / etw_diag   (any order)
+target_exiting                  (once, when the target is seen exiting)
 etw_stats                       (last; absent if the launcher was killed)
 ```
 
@@ -415,8 +416,9 @@ DescriptorHeap, CommandAllocator) and the ETW object was created after the
 previous occupant of that address was destroyed. Either side may arrive
 first. Details a consumer may notice:
 
-- **Rundowns.** The launcher asks D3D12 for a rundown (capture state) every
-  10 s; the library then re-reports every live object under a *new*
+- **Rundowns.** With `--etw-rundown <seconds>` the launcher asks D3D12 for
+  a rundown (capture state) at that interval (default: never, see README);
+  the library then re-reports every live object under a *new*
   `lib_id`. Those re-reports are folded into the existing object (no new
   `etw_object` / `etw_bind` lines), only updating its size/location if they
   changed. `lib_id` in the sidecar is always the first id the object got.
@@ -435,14 +437,15 @@ first. Details a consumer may notice:
 First line. Identifies the session and the main log it belongs to.
 
 ```jsonl
-{"event":"etw_hello","ts_ns":157200,"etw_format":1,"pid":9376,"qpc_freq":10000000,"qpc_start":2849217653886,"session":"dx12track-etw-57540","rundown_interval_ms":10000,"pending_timeout_ms":10000,"main_log":"D:\\runs\\run.jsonl"}
+{"event":"etw_hello","ts_ns":157200,"etw_format":1,"pid":9376,"qpc_freq":10000000,"qpc_start":2849217653886,"session":"dx12track-etw-57540","rundown_interval_ms":0,"pending_timeout_ms":10000,"main_log":"D:\\runs\\run.jsonl"}
 ```
 
 - **`etw_format`**: version of the sidecar format (currently 1).
 - **`pid`**, **`qpc_freq`**, **`qpc_start`**: copied from the main log's
   `hello`.
 - **`session`**: the ETW session name (`dx12track-etw-<launcher pid>`).
-- **`rundown_interval_ms`**: how often a rundown is requested.
+- **`rundown_interval_ms`**: how often a rundown is requested
+  (`--etw-rundown`); `0` = no periodic rundowns (the default).
 - **`pending_timeout_ms`**: how long an ETW object waits for its main-log
   object before it counts as `pending_expired` in `etw_stats`.
 
@@ -458,7 +461,8 @@ The library reported a new D3D12 object (rundown re-reports excluded).
 - **`ptr`**: the object's address in the target (= main-log `created.ptr`).
 - **`size`**: size reported at creation: the GPU VA range for resources and
   heaps; the driver allocation for pipeline states, state objects,
-  descriptor heaps and command allocators (often 0 until a rundown).
+  descriptor heaps and command allocators (often 0; pipeline states get
+  theirs from a rundown or at destruction).
 - **`group`**: memory location at creation, `vram` / `sys` / `unknown`.
 
 ### `etw_bind`
@@ -493,7 +497,8 @@ change after that.
 
 Location changes come from the library's segment-group reports (an
 allocation paged out to system memory, or promoted back). Changes stamped
-after the target process exited are ignored (process teardown).
+after the target process began exiting are ignored (process teardown; see
+`target_exiting`).
 
 ### `driver_size`
 The driver-side size of a pipeline state, descriptor heap or command
@@ -505,7 +510,8 @@ non-zero value.
 ```
 
 Shader-visible descriptor heaps report their size at creation. Pipeline
-states only get a size from a rundown (or at destruction), and drivers pool
+states only get a size from a rundown (`--etw-rundown`) or at destruction
+(by then the main-log object is usually gone, so no line), and drivers pool
 PSO memory, so many PSOs never get one (several PSOs can share an
 allocation). Command allocators report 0 in practice.
 
@@ -542,6 +548,9 @@ over adapters; a key is present once the kernel has reported that counter.
 | `page_ins` / `page_outs` | running count of `residency` page-in / page-out operations |
 
 The library reports in MB of 10^6 bytes; the launcher converts to bytes.
+Samples stamped after the target began exiting (`target_exiting`) are
+ignored, so the last lines keep the pre-exit values instead of the
+teardown's drop to 0.
 Values are the kernel's: transient dips (e.g. `local_resident` dropping to
 ~1 MB for one sample while the budget is recomputed) do occur.
 
@@ -551,6 +560,24 @@ The library reported an object's destruction.
 ```jsonl
 {"event":"etw_object_destroyed","ts_ns":15838032200,"lib_id":9}
 ```
+
+### `target_exiting`
+The launcher saw the target exiting (its exit code is no longer
+`STILL_ACTIVE`, or the process is gone). Written once.
+
+```jsonl
+{"event":"target_exiting","ts_ns":27804404800,"detected_ns":27904508100,"exit_code":4294967295}
+```
+
+- **`ts_ns`**: the last time the target was seen still running = the
+  cutoff: `location` changes and `residency` operations stamped after it
+  are ignored (counted in `etw_stats.post_exit_ignored`). When a process is
+  killed, the kernel moves its remaining GPU memory to system memory during
+  teardown, which would otherwise show up as a wave of `location` → `sys`
+  lines at the very end.
+- **`detected_ns`**: when the launcher noticed (at most ~100 ms after
+  `ts_ns`).
+- **`exit_code`** *(optional)*: the target's exit code, when known.
 
 ### `etw_diag`
 A diagnostic from the library (`DiagnosticsSink`). Freeform `msg`.
@@ -574,7 +601,8 @@ Last line: session and join statistics.
   delivered / dropped by the session. Any loss means the sidecar is
   incomplete.
 - **`exceptions`**: records the library failed to decode (dropped).
-- **`rundowns`**, **`rundown_failures`**: capture-state requests.
+- **`rundowns`**, **`rundown_failures`**: periodic capture-state requests
+  (`--etw-rundown`; `0` without it; the one at session start isn't counted).
 - **`etw_objects_created`**: library creation callbacks, including
   **`rundown_duplicates`** (re-reports folded into an existing object).
 - **`binds`**, **`late_matches`**: see `etw_bind`.
@@ -586,5 +614,5 @@ Last line: session and join statistics.
 - **`make_resident`**, **`evict`**, **`page_ins`**, **`page_outs`**:
   residency operations.
 - **`post_exit_ignored`**: group changes / residency operations stamped
-  after the target exited (ignored).
+  after the target began exiting (ignored, see `target_exiting`).
 - **`diagnostics`**: number of `etw_diag` lines.

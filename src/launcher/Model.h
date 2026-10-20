@@ -93,8 +93,9 @@ struct EtwSnapshot {
     uint64_t late_matches = 0;      // ETW objects matched to an already-destroyed tracked object
 
     uint64_t group_changes = 0, make_resident = 0, evict = 0, page_ins = 0, page_outs = 0;
-    uint64_t post_exit_ignored = 0;  // group changes / residency ops after the child exited
+    uint64_t post_exit_ignored = 0;  // group changes / residency ops after the child began exiting
     uint64_t diagnostics = 0;
+    uint32_t rundown_interval_ms = 0;  // --etw-rundown (0 = no periodic rundowns)
     etw::Stats session;             // events / lost / exceptions / rundowns
 };
 
@@ -127,10 +128,25 @@ public:
 
     void MarkChildExited(uint32_t exit_code);
 
-    // --etw: the child's exit time as a raw QPC value. ETW segment-group
-    // changes and residency operations stamped after it are process-teardown
-    // noise (the kernel tears down allocations the app never released) and
-    // are ignored.
+    // --etw post-exit filter. ETW segment-group changes, residency
+    // operations and counter samples stamped after the child began exiting
+    // are process-teardown noise and are ignored: when a process is killed
+    // (or exits still holding GPU memory), the kernel moves that memory to
+    // system memory while tearing the process down, for up to several
+    // hundred ms *before* the process's recorded ExitTime. Its exit code,
+    // however, is set before that teardown starts.
+    //
+    // SetChildProcess: the child's process handle (must stay open while the
+    // ETW session runs). Call before starting the session.
+    void SetChildProcess(void* process_handle);
+    // Samples the child: still running (exit code STILL_ACTIVE, not
+    // signaled) -> remembers now as "last seen running"; otherwise the
+    // cutoff becomes the last time it was seen running. Call regularly
+    // (main loop, ~10 Hz); the ETW consumer also calls it when an event is
+    // newer than the last sample.
+    void PollChild();
+    // Fallback cutoff: the child's ExitTime as a raw QPC value (only matters
+    // if the exit code is indistinguishable from STILL_ACTIVE, i.e. 259).
     void SetChildExitQpc(uint64_t exit_qpc);
 
     // ---- --etw ------------------------------------------------------------
@@ -197,6 +213,8 @@ private:
     void     EtwOnCreated(LiveObject& o, uint64_t ts);
     void     EtwOnDestroyed(LiveObject& o, uint64_t ts);
     void     RefreshJoinStats();
+    void     PollChildLocked();
+    bool     AfterChildExitLocked(uint64_t ts);
 
     // Sidecar JSONL.
     void     SideLine(const std::string& line);
@@ -212,7 +230,11 @@ private:
     uint64_t qpc_freq_     = 0;
     uint64_t qpc_start_    = 0;
     uint64_t qpc_start_ns_ = 0;   // qpc_start in absolute QPC-ns (library timeline)
-    uint64_t child_exit_ts_ = UINT64_MAX;  // ts_ns of the child's exit (see SetChildExitQpc)
+    uint64_t child_exit_ts_ = UINT64_MAX;  // ts_ns of the child's ExitTime (see SetChildExitQpc)
+    void*    child_process_   = nullptr;   // HANDLE (see SetChildProcess)
+    uint64_t child_alive_ts_  = 0;         // ts_ns the child was last seen running
+    bool     child_exiting_   = false;     // seen exiting (exit code set / signaled)
+    uint64_t exit_cutoff_ts_  = UINT64_MAX; // child_alive_ts_ when it was first seen exiting
 
     std::unordered_map<uint64_t, uint64_t> ptr_to_id_;      // object_ptr -> live id
     // Recently destroyed tracked objects per address (oldest first), so ETW

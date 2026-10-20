@@ -278,9 +278,14 @@ void Renderer::Render(const Model::Snapshot& snap) {
             const bool na = (k.t == etw::ObjType::CommandAllocator && snap.etw.sized[t] == 0);
             if (na) swprintf(b, 16, L"     n/a");
             else FormatBytes(snap.etw.bytes[t], b, 16);
-            PutF(x, r++, kAttrNormal, L"  %-18s %7llu %7llu  %ls", k.name,
+            // Without periodic rundowns a PSO reports its size only when it
+            // is destroyed, so live PSOs are mostly unsized.
+            const bool hint = (k.t == etw::ObjType::PipelineState &&
+                               snap.etw.rundown_interval_ms == 0);
+            PutF(x, r++, kAttrNormal, L"  %-18s %7llu %7llu  %-9ls%ls", k.name,
                 (unsigned long long)snap.etw.live[t],
-                (unsigned long long)snap.etw.sized[t], b);
+                (unsigned long long)snap.etw.sized[t], b,
+                hint ? L"  (--etw-rundown for sizes)" : L"");
         }
         if (r > row) row = r;
     }

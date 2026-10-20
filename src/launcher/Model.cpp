@@ -329,6 +329,51 @@ void Model::SetChildExitQpc(uint64_t exit_qpc) {
     child_exit_ts_ = exit_qpc > qpc_start_ ? TicksToNs(exit_qpc - qpc_start_, qpc_freq_) : 0;
 }
 
+void Model::SetChildProcess(void* process_handle) {
+    std::lock_guard<std::mutex> lock(mu_);
+    child_process_ = process_handle;
+}
+
+void Model::PollChild() {
+    std::lock_guard<std::mutex> lock(mu_);
+    PollChildLocked();
+}
+
+void Model::PollChildLocked() {
+    if (child_exiting_ || !child_process_) return;
+    // Sample the clock first: if the checks below say "running", the child
+    // was still running at `now`.
+    const uint64_t now = NowTsLocked();
+    const HANDLE h = static_cast<HANDLE>(child_process_);
+    DWORD code = STILL_ACTIVE;
+    const bool signaled = WaitForSingleObject(h, 0) == WAIT_OBJECT_0;
+    if (!signaled) {
+        if (!GetExitCodeProcess(h, &code)) return;  // unknown: no news
+        if (code == STILL_ACTIVE) {
+            child_alive_ts_ = now;
+            return;
+        }
+    } else {
+        GetExitCodeProcess(h, &code);
+    }
+    // Exiting (or gone). Anything after the last "running" sample may be
+    // teardown.
+    child_exiting_  = true;
+    exit_cutoff_ts_ = child_alive_ts_;
+    J j("target_exiting", exit_cutoff_ts_);
+    j.u("detected_ns", now);
+    if (code != STILL_ACTIVE) j.u("exit_code", code);
+    SideLine(j.done());
+}
+
+// True if an ETW event stamped `ts` may be process teardown. Events newer than
+// the last "running" sample trigger a fresh sample, so this never has to wait
+// for the main loop.
+bool Model::AfterChildExitLocked(uint64_t ts) {
+    if (ts > child_alive_ts_) PollChildLocked();
+    return ts > exit_cutoff_ts_ || ts > child_exit_ts_;
+}
+
 // ===========================================================================
 // --etw: setup / periodic / teardown
 // ===========================================================================
@@ -342,6 +387,7 @@ bool Model::EnableEtw(const std::wstring& sidecar_path, const std::wstring& sess
     session_name_        = session_name;
     main_log_path_       = main_log_path;
     rundown_interval_ms_ = rundown_interval_ms;
+    s_.etw.rundown_interval_ms = rundown_interval_ms;
     side_ = _wfopen(sidecar_path.c_str(), L"wb");
     if (side_) setvbuf(side_, nullptr, _IOFBF, 256 * 1024);
     return side_ != nullptr;
@@ -868,7 +914,7 @@ void Model::OnEtwGroupChanges(const etw::GroupChange* changes, uint32_t count) {
     if (!etw_enabled_) return;
     for (uint32_t i = 0; i < count; ++i) {
         const uint64_t ts = ConvTs(changes[i].ts);
-        if (ts > child_exit_ts_) { ++s_.etw.post_exit_ignored; continue; }
+        if (AfterChildExitLocked(ts)) { ++s_.etw.post_exit_ignored; continue; }
         ++s_.etw.group_changes;
         EtwObj* e = FindEtw(changes[i].lib_id, nullptr);
         if (!e) continue;
@@ -881,7 +927,7 @@ void Model::OnEtwResidency(int64_t ts, uint64_t lib_id, etw::ObjType type,
                            etw::ResidencyOp op) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!etw_enabled_) return;
-    if (ConvTs(ts) > child_exit_ts_) { ++s_.etw.post_exit_ignored; return; }
+    if (AfterChildExitLocked(ConvTs(ts))) { ++s_.etw.post_exit_ignored; return; }
     switch (op) {
         case etw::ResidencyOp::MakeResident: ++s_.etw.make_resident; return;
         case etw::ResidencyOp::Evict:        ++s_.etw.evict;         return;
@@ -897,10 +943,17 @@ void Model::OnEtwResidency(int64_t ts, uint64_t lib_id, etw::ObjType type,
                  .str("op", ResidencyOpName(op)).done());
 }
 
-void Model::OnEtwCounter(int64_t /*ts*/, uint64_t counter_id, etw::CounterKind kind,
+void Model::OnEtwCounter(int64_t ts, uint64_t counter_id, etw::CounterKind kind,
                          double value_mb) {
     std::lock_guard<std::mutex> lock(mu_);
     if (!etw_enabled_) return;
+    // Teardown samples (dropping to 0 as the kernel frees the process's
+    // memory): keep the last values from before the exit instead. Samples
+    // without a timestamp are the library's end-of-session replay of the last
+    // values it reported (OnDataComplete): nothing new, and after a filtered
+    // exit they'd be the teardown values again.
+    if (ts <= 0) return;
+    if (AfterChildExitLocked(ConvTs(ts))) return;
     const double b = value_mb * 1e6;
     counters_[counter_id] = { kind, b > 0 ? static_cast<uint64_t>(b + 0.5) : 0 };
 }

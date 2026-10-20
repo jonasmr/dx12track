@@ -18,13 +18,12 @@ namespace fs = std::filesystem;
 
 namespace {
 
-// --etw: how often to ask the D3D12 provider for a rundown (capture state).
-// Pipeline-state driver sizes are only reported by rundowns.
-constexpr uint32_t kEtwRundownIntervalMs = 10'000;
+// --etw-rundown <seconds>: upper bound, so the interval in ms fits in 32 bits.
+constexpr unsigned long kMaxEtwRundownSeconds = 86'400;
 
 void PrintUsage() {
     fwprintf(stderr,
-        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger] [--etw [--no-elevate]] [--] <target.exe> [args...]\n"
+        L"Usage: dx12track.exe [-o <log.jsonl>] [--callstacks] [--verbose] [--debugger] [--etw [--no-elevate] [--etw-rundown <seconds>]] [--] <target.exe> [args...]\n"
         L"  -o <path>     path to JSON-Lines log file written by the DLL\n"
         L"                (default: dx12track.jsonl in the launcher's cwd)\n"
         L"  --callstacks  capture a callstack on every object creation and\n"
@@ -44,6 +43,12 @@ void PrintUsage() {
         L"                the target still runs non-elevated. Declined -> no ETW.\n"
         L"  --no-elevate  with --etw: don't ask for elevation (enough when you're\n"
         L"                in 'Performance Log Users')\n"
+        L"  --etw-rundown <seconds>\n"
+        L"                with --etw: ask D3D12 for a rundown (capture state)\n"
+        L"                every <seconds> (>= 1), so pipeline states get driver\n"
+        L"                sizes while they live. Off by default: a rundown can\n"
+        L"                crash the target if it destroys a heap at the same\n"
+        L"                time (seen in D3D12Core + the NVIDIA driver).\n"
         L"  --dump-console <path>\n"
         L"                debugging aid: also write the console frame as text to\n"
         L"                <path> (once per second and at exit)\n");
@@ -78,8 +83,10 @@ std::wstring EtwSidecarPath(const std::wstring& jsonl_path) {
 }
 
 // The exited child's ExitTime (FILETIME) mapped onto the QPC timeline by
-// sampling both clocks now. Accuracy is ~1 ms, plenty to tell the app's last
-// ETW events from its process-teardown ones.
+// sampling both clocks now (accuracy ~1 ms). Only a fallback for the --etw
+// post-exit filter: the kernel records ExitTime at the *end* of process
+// teardown, after it has already paged the dead process's GPU memory out
+// (Model::PollChild has the primary cutoff).
 bool ChildExitQpc(HANDLE process, uint64_t* exit_qpc) {
     FILETIME created{}, exited{}, kernel{}, user{};
     if (!GetProcessTimes(process, &created, &exited, &kernel, &user)) return false;
@@ -150,6 +157,7 @@ int wmain(int argc, wchar_t** argv) {
     bool wait_debugger = false;
     bool use_etw       = false;
     bool no_elevate    = false;
+    uint32_t etw_rundown_ms = 0;  // --etw-rundown; 0 = no periodic rundowns
 
     int i = 1;
 
@@ -183,6 +191,17 @@ int wmain(int argc, wchar_t** argv) {
             use_etw = true;
         } else if (a == L"--no-elevate") {
             no_elevate = true;
+        } else if (a == L"--etw-rundown") {
+            const wchar_t* v = i + 1 < argc ? argv[++i] : L"";
+            wchar_t* end = nullptr;
+            const unsigned long s = wcstoul(v, &end, 10);
+            if (!*v || *end || *v == L'-' || s < 1 || s > kMaxEtwRundownSeconds) {
+                Out(stderr, L"--etw-rundown needs a number of seconds (1..%lu), got '%ls'\n",
+                    kMaxEtwRundownSeconds, v);
+                PrintUsage();
+                return 1;
+            }
+            etw_rundown_ms = static_cast<uint32_t>(s * 1000);
         } else if (a == L"--dump-console" && i + 1 < argc) {
             dump_console_path = argv[++i];
         } else if (a == L"--") {
@@ -198,6 +217,11 @@ int wmain(int argc, wchar_t** argv) {
     for (; i < argc; ++i) child_args.emplace_back(argv[i]);
 
     if (target.empty()) { PrintUsage(); return 1; }
+    if (etw_rundown_ms && !use_etw) {
+        Out(stderr, L"--etw-rundown requires --etw\n");
+        PrintUsage();
+        return 1;
+    }
 
     // Resolve to absolute path so the child process and JSONL log are unambiguous.
     target = fs::absolute(target).wstring();
@@ -333,12 +357,15 @@ int wmain(int argc, wchar_t** argv) {
     if (use_etw) {
         etw_sidecar = EtwSidecarPath(jsonl_path);
         if (!model.EnableEtw(etw_sidecar, etw_monitor.SessionName(), jsonl_path,
-                             kEtwRundownIntervalMs)) {
+                             etw_rundown_ms)) {
             Out(stderr, L"ETW: could not open sidecar %ls; continuing without it.\n",
                 etw_sidecar.c_str());
             etw_sidecar.clear();
         }
         std::wstring err = etw_skip_reason;
+        // Before Start: the consumer thread uses the handle to tell the
+        // target's own location changes from its process teardown.
+        model.SetChildProcess(pi.hProcess);
         if (etw_skip_reason.empty() && etw_monitor.Start(pi.dwProcessId, &model, &err)) {
             etw_running = true;
             model.SetEtwRunning(true);
@@ -377,6 +404,10 @@ int wmain(int argc, wchar_t** argv) {
     dx12track::etw::Stats etw_stats;
     while (!child_done) {
         DWORD wait = WaitForSingleObject(pi.hProcess, 100);
+        // Every iteration: notes when the target was last seen running, and
+        // when it starts exiting (its exit code is set before the kernel
+        // tears down its GPU memory; see Model::PollChild).
+        if (etw_running) model.PollChild();
         if (wait == WAIT_OBJECT_0) {
             GetExitCodeProcess(pi.hProcess, &child_exit);
             child_done = true;
@@ -387,7 +418,7 @@ int wmain(int argc, wchar_t** argv) {
         }
         if (etw_running) {
             const ULONGLONG now = GetTickCount64();
-            if (now - last_rundown_ms >= kEtwRundownIntervalMs) {
+            if (etw_rundown_ms && now - last_rundown_ms >= etw_rundown_ms) {
                 last_rundown_ms = now;
                 etw_monitor.RequestRundown();
             }

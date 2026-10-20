@@ -1,5 +1,31 @@
 # dx12track — handoff notes
 
+## Update 2026-10-20: `--etw-rundown`, kill-teardown filter
+
+- Periodic D3D12 rundowns are now opt-in: `--etw-rundown <seconds>`
+  (requires `--etw`, >= 1). The old default (every 10 s) crashed
+  vram-timing once: `D3D12Core!CDevice::ETWRundown` →
+  `CPageable<ID3D12Heap1>::LogEtwAllocationInfo<CHeap>` →
+  `CDevice::GetEtwAllocationInfoImpl` raced a heap destruction on another
+  thread (`CHeap::LUCPrepareForDestruction` waiting on the SRW lock the
+  rundown held) and `nvwgf2umx` faulted on a null read. The capture-state
+  request in `EnableProvider` at session start stays (target still
+  suspended, no objects yet). Without rundowns live PSOs are mostly
+  unsized; the console's Driver memory PSO row says
+  `(--etw-rundown for sizes)`.
+- Post-exit filter fixed for killed targets. Measured on vram-timing (6 GB,
+  TerminateProcess): the kernel's teardown moves every still-allocated
+  resource to `sys` over ~300-400 ms, all stamped *before* the process's
+  `ExitTime` (GetProcessTimes), so the old `ts > ExitTime` filter caught
+  none of them. The exit code, though, is set before the teardown starts
+  (seen ~10 ms before the first teardown event). `Model::PollChild` (main
+  loop every 100 ms, plus the ETW consumer whenever an event is newer than
+  the last sample) records the last time the target was seen running
+  (`STILL_ACTIVE`, not signaled); once it's seen exiting, group changes /
+  residency ops after that time are ignored (`post_exit_ignored`), and a
+  sidecar `target_exiting` line records the cutoff. ExitTime stays as a
+  fallback (exit code 259).
+
 ## Update 2026-10-10: UAC elevation for `--etw`
 
 - Non-elevated `--etw` runs relaunch the launcher elevated (UAC prompt) and
