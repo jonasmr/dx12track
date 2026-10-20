@@ -131,6 +131,8 @@ void JsonLog::Append(EventKind kind, uint64_t ts_ns,
                     out.push_back(','); AppendKey(out, "parent_heap_ptr");
                     out.append(hex);
                 }
+                if (p->alloc == AllocationKind::Placed)
+                    comma_kv_u64("heap_offset", p->heap_offset);
                 out.push_back(','); AppendKey(out, "name");
                 AppendJsonString(out, p->name, kMaxNameChars);
                 if (p->frame_count) {

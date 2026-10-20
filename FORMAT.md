@@ -1,4 +1,4 @@
-# dx12track JSONL format (protocol v4)
+# dx12track JSONL format (protocol v5)
 
 The log file produced by `--callstacks` / `Dx12Track_StartLogging` is
 [JSON Lines](https://jsonlines.org/): UTF-8 text, one JSON object per line,
@@ -12,7 +12,7 @@ With `--etw` the launcher additionally writes a second JSONL file, the
 ## Versioning
 
 The first line of every file is a `hello` event whose `protocol` field is
-the wire-format version (currently **4**). Consumers should refuse files
+the wire-format version (currently **5**). Consumers should refuse files
 whose `protocol` they don't understand; we bump the field whenever an
 existing event's fields change shape or are removed. Adding new event
 kinds or appending fields to an existing event is a non-breaking change
@@ -27,6 +27,7 @@ is additive. History:
 | --- | --- |
 | 3 | `residency_priority` events, `parent_heap_ptr` on placed resources |
 | 4 | `created.ptr` (the app-visible interface pointer, the ETW join key) and `hello.qpc_start` (the QPC value at `ts_ns` 0). All `ts_ns` in a file now come from one clock (before v4 each DLL subsystem lazily started its own, so `ts_ns` of different event kinds could be offset from each other by a few ms). A v3 JSONL reader keeps working on v4 files. |
+| 5 | `created.heap_offset` on placed resources (the `HeapOffset` passed to `CreatePlacedResource*`), so consumers can tell which bytes of a heap a placed resource occupies (and which placed resources alias). JSONL-additive: a v4 reader keeps working on v5 files. |
 
 ## File-level structure
 
@@ -96,7 +97,7 @@ the `event` discriminator. The full schema below is a single
         "event":     { "const": "hello" },
         "ts_ns":     { "type": "integer", "const": 0 },
         "pid":       { "type": "integer", "minimum": 1 },
-        "protocol":  { "type": "integer", "const": 4 },
+        "protocol":  { "type": "integer", "const": 5 },
         "qpc_freq":  { "type": "integer", "minimum": 1 },
         "qpc_start": { "type": "integer", "minimum": 0 },
         "exe":       { "type": "string" }
@@ -126,6 +127,7 @@ the `event` discriminator. The full schema below is a single
         "size":           { "type": "integer", "minimum": 0 },
         "parent_heap_id": { "type": "integer", "minimum": 0 },
         "parent_heap_ptr": { "$ref": "#/$defs/HexAddress" },
+        "heap_offset":    { "type": "integer", "minimum": 0 },
         "name":           { "type": "string" },
         "stack": {
           "type": "array",
@@ -222,11 +224,11 @@ something the producer cross-validates against at runtime.
 First line of every file. Identifies the run.
 
 ```jsonl
-{"event":"hello","ts_ns":0,"pid":50528,"protocol":4,"qpc_freq":10000000,"qpc_start":2849008433560,"exe":"D:\\game\\game.exe"}
+{"event":"hello","ts_ns":0,"pid":50528,"protocol":5,"qpc_freq":10000000,"qpc_start":2849008433560,"exe":"D:\\game\\game.exe"}
 ```
 
 - **`pid`**: process id of the target the DLL was injected into.
-- **`protocol`**: the wire-format version. Currently **4**.
+- **`protocol`**: the wire-format version. Currently **5**.
 - **`qpc_freq`**: ticks per second of `QueryPerformanceCounter`.
 - **`qpc_start`** *(v4)*: the raw `QueryPerformanceCounter` value that
   corresponds to `ts_ns` = 0. QPC is machine-wide, so anything else stamped
@@ -258,13 +260,22 @@ A D3D12 object was successfully created and registered.
 - **`size`**: bytes. For buffers this is `D3D12_RESOURCE_DESC.Width`; for
   textures it's `ID3D12Device::GetResourceAllocationInfo().SizeInBytes`;
   for heaps it's `D3D12_HEAP_DESC.SizeInBytes`. `0` for non-memory-bearing
-  objects.
+  objects. The same rule applies to placed resources: a placed buffer
+  reports its exact `Width` (not rounded up to the 64 KiB placement
+  alignment), a placed texture its aligned allocation size, so
+  `[heap_offset, heap_offset + size)` is the byte range it occupies in its
+  heap.
 - **`parent_heap_id`**: only non-zero for `alloc == "Placed"` — refers to
   the `id` of the heap the resource was placed into. `0` otherwise.
 - **`parent_heap_ptr`** *(optional)*: only present for `alloc == "Placed"` —
   the raw `IUnknown*` of the parent heap as a quoted hex string. Useful for
   cross-referencing with the app's own heap pointers when the tracker `id`
   isn't visible to the app.
+- **`heap_offset`** *(optional, v5)*: only present for `alloc == "Placed"` —
+  the `HeapOffset` argument the app passed to `CreatePlacedResource*`, in
+  bytes from the start of the parent heap (can legitimately be `0`).
+  Resources whose `[heap_offset, heap_offset + size)` ranges overlap in the
+  same heap alias each other.
 - **`name`**: empty at creation; populated by subsequent `renamed` events
   that mirror the most-recent `ID3D12Object::SetName` /
   `SetPrivateData(WKPDID_D3DDebugObjectName{,W})` call.

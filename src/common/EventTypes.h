@@ -15,7 +15,7 @@
 namespace dx12track {
 
 constexpr uint32_t kProtocolMagic       = 0x44583132; // 'DX12'
-constexpr uint32_t kProtocolVersion     = 4;
+constexpr uint32_t kProtocolVersion     = 5;
 constexpr size_t   kMaxNameChars        = 256;
 constexpr size_t   kMaxCallstackFrames  = 32;
 constexpr size_t   kMaxDiagnosticChars  = 512;
@@ -83,6 +83,7 @@ struct CreatedPayload {
     uint64_t parent_heap_ptr;  // raw IUnknown* of the parent heap, 0 if not Placed
     uint64_t object_ptr;       // (v4) the interface pointer the app received from Create*
                                // (*ppv, not QI'd). Equals the D3D12 ETW object address.
+    uint64_t heap_offset;      // (v5) HeapOffset passed to CreatePlacedResource*, 0 if not Placed
     uint32_t heap_type;        // D3D12_HEAP_TYPE (0 if alloc==None)
     uint32_t dimension;        // D3D12_RESOURCE_DIMENSION (Buffer/Texture*/Unknown)
     uint32_t format;           // DXGI_FORMAT (UNKNOWN for non-resources)

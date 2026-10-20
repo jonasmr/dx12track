@@ -273,10 +273,10 @@ exists.
 ## Output: JSONL format
 
 One JSON object per line. Stable record shapes (no nested objects beyond
-arrays). Current protocol version is **4**. Sample lines:
+arrays). Current protocol version is **5**. Sample lines:
 
 ```jsonl
-{"event":"hello","ts_ns":0,"pid":36592,"protocol":4,"qpc_freq":10000000,"qpc_start":2849008433560,"exe":"…\\ModelViewer.exe"}
+{"event":"hello","ts_ns":0,"pid":36592,"protocol":5,"qpc_freq":10000000,"qpc_start":2849008433560,"exe":"…\\ModelViewer.exe"}
 {"event":"module_loaded","ts_ns":0,"base":"0x7ff6c9060000","size":11304960,"timestamp":1780203981,"pdb_age":1,"pdb_guid":"8c3d35b8-e4f6-4d6e-8f7a-fd384f00bdbb","name":"…\\ModelViewer.exe","pdb_name":"…\\ModelViewer.pdb"}
 {"event":"created","ts_ns":52606800,"id":12,"ptr":"0x22c3ca534b0","type":"Resource","alloc":"Committed","heap":"Default","dim":"Tex2D","format":28,"size":65536,"parent_heap_id":0,"name":"","stack":["0x7ff89ddc9228","0x7ff928dfb972",…]}
 {"event":"renamed","ts_ns":53180300,"id":12,"name":"ShadowMap"}

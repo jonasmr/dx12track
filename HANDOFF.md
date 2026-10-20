@@ -1,5 +1,14 @@
 # dx12track — handoff notes
 
+## Update 2026-10-20: protocol 5, `created.heap_offset`
+
+- `CreatedPayload` gained `heap_offset` (the `HeapOffset` argument of
+  `CreatePlacedResource`/`1`/`2`, plumbed through `ObjectInfo`), so the
+  protocol is **5**. JSONL emits `"heap_offset"` right after
+  `parent_heap_ptr`, only for `alloc == "Placed"`. The launcher doesn't use
+  it; dx12track-ui uses `[heap_offset, heap_offset + size)` to show how much
+  of each heap is covered by live placed resources.
+
 ## Update 2026-10-20: `--etw-rundown`, kill-teardown filter
 
 - Periodic D3D12 rundowns are now opt-in: `--etw-rundown <seconds>`
@@ -253,7 +262,7 @@ after opening the log so the JSONL always leads with a `hello`.
 
 ```
 src/
-  common/EventTypes.h          Wire format (protocol v4). Single source of truth
+  common/EventTypes.h          Wire format (protocol v5). Single source of truth
                                shared between launcher (consumer) and DLL (producer).
                                Includes #pragma pack(push,1) payloads for every
                                EventKind plus enum/name helpers.

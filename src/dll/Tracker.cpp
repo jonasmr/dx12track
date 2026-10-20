@@ -147,6 +147,7 @@ void Tracker::EmitCreated(const ObjectInfo& info) {
     p.parent_heap_id  = info.parent_heap_id;
     p.parent_heap_ptr = info.parent_heap_ptr;
     p.object_ptr      = info.object_ptr;
+    p.heap_offset     = info.heap_offset;
     p.heap_type       = info.heap_type;
     p.dimension      = info.dimension;
     p.format         = info.format;

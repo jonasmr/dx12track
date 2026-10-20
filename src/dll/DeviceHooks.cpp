@@ -77,7 +77,8 @@ ObjectInfo MakeResourceInfo(ID3D12Device* dev,
                              AllocationKind alloc,
                              D3D12_HEAP_TYPE heap_type,
                              uint64_t parent_heap_id,
-                             ID3D12Heap*    parent_heap_ptr = nullptr) {
+                             ID3D12Heap*    parent_heap_ptr = nullptr,
+                             uint64_t       heap_offset = 0) {
     ObjectInfo info{};
     info.type            = ObjectType::Resource;
     info.alloc           = alloc;
@@ -87,6 +88,7 @@ ObjectInfo MakeResourceInfo(ID3D12Device* dev,
     info.size_bytes      = ComputeResourceSize(dev, desc);
     info.parent_heap_id  = parent_heap_id;
     info.parent_heap_ptr = reinterpret_cast<uint64_t>(parent_heap_ptr);
+    info.heap_offset     = heap_offset;
     return info;
 }
 
@@ -291,7 +293,8 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource(
         }
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, *pDesc, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap), pHeap));
+                               ht, LookupHeapId(pHeap), pHeap,
+                               HeapOffset));
     }
     return hr;
 }
@@ -515,7 +518,8 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource1(
         if (pHeap) ht = pHeap->GetDesc().Properties.Type;
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, d, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap), pHeap));
+                               ht, LookupHeapId(pHeap), pHeap,
+                               HeapOffset));
     }
     return hr;
 }
@@ -583,7 +587,8 @@ HRESULT STDMETHODCALLTYPE Hook_CreatePlacedResource2(
         if (pHeap) ht = pHeap->GetDesc().Properties.Type;
         Track(reinterpret_cast<IUnknown**>(ppvResource),
               MakeResourceInfo(This, d, AllocationKind::Placed,
-                               ht, LookupHeapId(pHeap), pHeap));
+                               ht, LookupHeapId(pHeap), pHeap,
+                               HeapOffset));
     }
     return hr;
 }
