@@ -25,6 +25,14 @@
   residency ops after that time are ignored (`post_exit_ignored`), and a
   sidecar `target_exiting` line records the cutoff. ExitTime stays as a
   fallback (exit code 259).
+- Agility SDK headers are vendored in `external/AgilitySDK/include/` (NuGet
+  `Microsoft.Direct3D.D3D12` 1.619.5, `build/native/include`, MIT; see its
+  README for updating). `dx12track_etw.vcxproj` sets
+  `DxTimingCaptureStandaloneBuild=false`, which drops the library's
+  `PackageReference`, and puts that directory first on its include path.
+  Reason: VS doesn't restore `PackageReference` for native projects, so a
+  fresh workspace failed in the IDE with `Cannot open include file:
+  'D3D12Events.h'`. No `/restore` or NuGet access needed any more.
 
 ## Update 2026-10-10: UAC elevation for `--etw`
 
@@ -51,14 +59,15 @@
   sidecar log `<log>.etw.jsonl`. See README "Memory location via ETW" and
   FORMAT.md "ETW sidecar".
 - Code: `src/etw/` (static lib, C++20, the only TUs that include the
-  library / Agility NuGet `d3d12.h`), join logic in `src/launcher/Model.cpp`
+  library / Agility SDK `d3d12.h`), join logic in `src/launcher/Model.cpp`
   (`EtwOnCreated`, `OnEtwObjectAddress`, `TryBindEtw`, ...), console in
   `Renderer.cpp`, session lifecycle in `Main.cpp`.
 - Protocol bumped to **4**: `created.ptr` (app-visible interface pointer =
   ETW object address) and `hello.qpc_start`. The DLL now has a single clock
   (`src/dll/Clock.cpp`) for every `ts_ns`.
-- Build now needs `git submodule update --init` and `msbuild /restore`
-  (NuGet `Microsoft.Direct3D.D3D12` 1.619.5 for the library).
+- Build now needs `git submodule update --init` (and, until 2026-10-20,
+  `msbuild /restore` for NuGet `Microsoft.Direct3D.D3D12`; the headers are
+  now vendored in `external/AgilitySDK/`).
 - `--dump-console <file>` writes the console frame as text (for automated
   runs).
 - Known, pre-existing (not caused by this work): ModelViewer (Debug) exits

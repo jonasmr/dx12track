@@ -15,25 +15,26 @@ via vcpkg.
 
 Prereqs: VS2022 (Desktop C++ workload, Windows SDK 10.0.26100), git, any
 [vcpkg](https://learn.microsoft.com/vcpkg/get_started/get-started)
-installation on `PATH` or `VCPKG_ROOT` (the VS-bundled copy works), and
-nuget.org access. The project pins its vcpkg registry via
-`vcpkg-configuration.json`, so the vcpkg tool's working-tree state doesn't
-matter — only that it can fetch.
+installation on `PATH` or `VCPKG_ROOT` (the VS-bundled copy works). The
+project pins its vcpkg registry via `vcpkg-configuration.json`, so the vcpkg
+tool's working-tree state doesn't matter — only that it can fetch.
 
 ```powershell
 git clone --recurse-submodules git@github.com:jonasmr/dx12track.git
 cd dx12track
 # (existing clone: git submodule update --init external/DxTimingCaptureLibrary)
-MSBuild.exe dx12track.sln /restore /p:Configuration=Release /p:Platform=x64
+MSBuild.exe dx12track.sln /p:Configuration=Release /p:Platform=x64
 ```
 
-`/restore` is needed (Visual Studio does it automatically): the
-`dx12track_etw` project compiles
+or open `dx12track.sln` in Visual Studio and build. No NuGet restore
+(`/restore`) is needed: the `dx12track_etw` project compiles
 [DxTimingCaptureLibrary](external/DxTimingCaptureLibrary) (git submodule,
 used unmodified) and gets `d3d12.h` / `D3D12Events.h` for it from the
-`Microsoft.Direct3D.D3D12` NuGet package. Its build output, including the
-NuGet restore files, goes under `build/`; nothing is written into the
-submodule.
+checked-in Agility SDK headers in
+[external/AgilitySDK](external/AgilitySDK/README.md) (NuGet
+`Microsoft.Direct3D.D3D12` 1.619.5, `build/native/include`), not from the
+library's own NuGet `PackageReference`. Its build output goes under
+`build/`; nothing is written into the submodule.
 
 Outputs:
 
@@ -381,4 +382,6 @@ The dx12track source under `src/` is provided as-is for use as a debugging
 tool. Vendored MinHook (`src/third_party/minhook/`) is BSD-licensed; see its
 own `LICENSE.txt`. The DirectX-Headers package fetched via vcpkg is MIT.
 DxTimingCaptureLibrary (`external/DxTimingCaptureLibrary`, git submodule)
-is MIT; see its `LICENSE` and `THIRD-PARTY-NOTICES.md`.
+is MIT; see its `LICENSE` and `THIRD-PARTY-NOTICES.md`. The vendored Agility
+SDK headers (`external/AgilitySDK/include/`) are MIT; see
+`external/AgilitySDK/LICENSE-CODE.txt`.

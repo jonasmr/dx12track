@@ -5,7 +5,7 @@
   external/DxTimingCaptureLibrary submodule. Linked into the launcher.
 
   Why a separate project:
-  - The library needs C++20 and the Agility SDK NuGet headers (unprefixed
+  - The library needs C++20 and the Agility SDK headers (unprefixed
     <d3d12.h>, <D3D12Events.h>); the rest of dx12track is C++17 on vcpkg's
     <directx/d3d12.h>. Keeping them in different TUs/projects avoids mixing two
     d3d12.h versions.
@@ -13,9 +13,11 @@
     submodule and uses the DLL CRT; here everything lands under build\ and uses
     the launcher's static CRT (/MT, /MTd).
 
-  Requires NuGet restore (msbuild /restore, or VS does it automatically) for
-  the Microsoft.Direct3D.D3D12 package the library's Directory.Build.props
-  references.
+  The Agility SDK headers come from the checked-in copy in
+  external\AgilitySDK\include (see its README.md), not from the
+  Microsoft.Direct3D.D3D12 NuGet package the library's standalone build
+  references: Visual Studio doesn't restore PackageReference for native
+  projects. No NuGet restore is needed.
 -->
 <Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <PropertyGroup Label="Globals">
@@ -24,27 +26,19 @@
     <RootNamespace>dx12track_etw</RootNamespace>
     <ConfigurationType>StaticLibrary</ConfigurationType>
     <Dx12TrackRoot>$([System.IO.Path]::GetFullPath('$(MSBuildThisFileDirectory)..\..\'))</Dx12TrackRoot>
-    <!-- NuGet restore output (project.assets.json, nuget.g.props/targets) goes
-         under build\ instead of src\etw\obj\. Must be set before
-         Microsoft.Cpp.Default.props (which imports Microsoft.Common.props). -->
-    <BaseIntermediateOutputPath>$(Dx12TrackRoot)build\nuget\etw\</BaseIntermediateOutputPath>
-    <!-- ResolveNuGetPackageAssets only knows managed assemblies and fails on C++
-         projects with "Sequence contains no elements". The package is consumed
-         through its build\native .props/.targets, which restore imports. -->
-    <ResolveNuGetPackages>false</ResolveNuGetPackages>
-    <!-- The library resolves <d3d12.h> from the Agility NuGet package; keep
-         vcpkg's DirectX-Headers off this project's include path. -->
+    <!-- Drops the library's Microsoft.Direct3D.D3D12 PackageReference (the
+         only thing this property gates); the headers come from
+         external\AgilitySDK\include instead (see AdditionalIncludeDirectories). -->
+    <DxTimingCaptureStandaloneBuild>false</DxTimingCaptureStandaloneBuild>
+    <!-- The library resolves <d3d12.h> from the vendored Agility SDK headers;
+         keep vcpkg's DirectX-Headers off this project's include path. -->
     <VcpkgEnabled>false</VcpkgEnabled>
     <VcpkgEnableManifest>false</VcpkgEnableManifest>
-    <!-- Headers only; don't copy D3D12Core.dll / SDK layers anywhere. -->
-    <Microsoft_Direct3D_D3D12_SkipLibraryCopy>true</Microsoft_Direct3D_D3D12_SkipLibraryCopy>
-    <Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>true</Microsoft_Direct3D_D3D12_SkipDebugLayerCopy>
   </PropertyGroup>
 
   <!-- The library's standalone build settings: x64 Debug/Release configurations,
-       toolset, Windows SDK, C++20, include dirs (include\, third_party\dxgk,
-       third_party\directstorage) and the Microsoft.Direct3D.D3D12 1.619.5
-       PackageReference. Must come after ConfigurationType and before
+       toolset, Windows SDK, C++20 and include dirs (include\, third_party\dxgk,
+       third_party\directstorage). Must come after ConfigurationType and before
        Microsoft.Cpp.Default.props. -->
   <Import Project="$(Dx12TrackRoot)external\DxTimingCaptureLibrary\Directory.Build.props" />
 
@@ -69,8 +63,10 @@
       <WarningLevel>Level3</WarningLevel>
       <SDLCheck>true</SDLCheck>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
-      <!-- The library's public headers also need the PixEventDecoder headers. -->
-      <AdditionalIncludeDirectories>$(PixEventDecoderPath)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <!-- Vendored Agility SDK headers first, so their d3d12.h / d3dcommon.h /
+           dxgiformat.h win over the Windows SDK's older copies. The library's
+           public headers also need the PixEventDecoder headers. -->
+      <AdditionalIncludeDirectories>$(Dx12TrackRoot)external\AgilitySDK\include;$(PixEventDecoderPath)\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
