@@ -20,6 +20,8 @@ project pins its vcpkg registry via `vcpkg-configuration.json`, so the vcpkg
 tool's working-tree state doesn't matter — only that it can fetch.
 
 ```powershell
+# (submodule URL is relative, so it uses the same ssh/https as this clone;
+#  over https: git clone --recurse-submodules https://github.com/jonasmr/dx12track.git)
 git clone --recurse-submodules git@github.com:jonasmr/dx12track.git
 cd dx12track
 # (existing clone: git submodule update --init external/DxTimingCaptureLibrary)
